@@ -1,4 +1,4 @@
-﻿// COPYRIGHT 2010, 2011, 2012, 2013, 2014 by the Open Rails project.
+// COPYRIGHT 2010, 2011, 2012, 2013, 2014 by the Open Rails project.
 // 
 // This file is part of Open Rails.
 // 
@@ -212,8 +212,11 @@ namespace Orts.Viewer3D
 
         bool UpdateState()
         {
-			Debug.Assert(Viewer.PlayerTrain.LeadLocomotive == Viewer.PlayerLocomotive ||Viewer.PlayerTrain.TrainType == Train.TRAINTYPE.AI_PLAYERHOSTING ||
-                Viewer.PlayerTrain.TrainType == Train.TRAINTYPE.REMOTE || Viewer.PlayerTrain.TrainType == Train.TRAINTYPE.STATIC, "PlayerTrain.LeadLocomotive must be PlayerLocomotive.");
+            bool LocomotiveEq = Viewer.PlayerTrain.LeadLocomotive == Viewer.PlayerLocomotive;
+            bool TrainType1 = Viewer.PlayerTrain.TrainType == Train.TRAINTYPE.AI_PLAYERHOSTING;
+            bool TrainType2 = Viewer.PlayerTrain.TrainType == Train.TRAINTYPE.REMOTE;
+            bool TrainType3 = Viewer.PlayerTrain.TrainType == Train.TRAINTYPE.STATIC;
+			Debug.Assert((LocomotiveEq || TrainType1 || TrainType2 || TrainType3), "PlayerTrain.LeadLocomotive must be PlayerLocomotive.");
 			var locomotive = Car.Train != null && Car.Train.IsActualPlayerTrain ? Viewer.PlayerLocomotive : null;
             if (locomotive == null && Car.Train != null && Car.Train.TrainType == Train.TRAINTYPE.REMOTE && Car is MSTSLocomotive && (Car as MSTSLocomotive) == Car.Train.LeadLocomotive)
                 locomotive = Car.Train.LeadLocomotive;

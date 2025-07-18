@@ -154,6 +154,7 @@ namespace Orts.Viewer3D
             var xnaTileTranslation = Matrix.CreateTranslation(dTileX * 2048, 0, -dTileZ * 2048);  // object is offset from camera this many tiles
             Matrix.Multiply(ref Location.XNAMatrix, ref xnaTileTranslation, out xnaTileTranslation);
 
+            frame.NextObject(ObjectClass.Signal);
             foreach (var head in Heads)
                 head.PrepareFrame(frame, elapsedTime, xnaTileTranslation);
 
@@ -674,7 +675,7 @@ namespace Orts.Viewer3D
 
     public class SignalLightMaterial : Material
     {
-        readonly SceneryShader SceneryShader;
+        readonly AbstractSceneryShader SceneryShader;
         readonly Texture2D Texture;
 
         public SignalLightMaterial(Viewer viewer, string textureName)
@@ -698,7 +699,11 @@ namespace Orts.Viewer3D
             {
                 foreach (var item in renderItems)
                 {
-                    SceneryShader.SignalLightIntensity = (item.ItemData as SignalLightState).GetIntensity();
+                    if (SceneryShader is SceneryShader)
+                    {
+                        ((SceneryShader) SceneryShader).SignalLightIntensity = (item.ItemData as SignalLightState).GetIntensity();
+
+                    }
                     SceneryShader.SetMatrix(item.XNAMatrix, ref XNAViewMatrix, ref XNAProjectionMatrix);
                     pass.Apply();
                     item.RenderPrimitive.Draw(graphicsDevice);
@@ -720,7 +725,6 @@ namespace Orts.Viewer3D
 
     public class SignalLightGlowMaterial : Material
     {
-        readonly SceneryShader SceneryShader;
         readonly Texture2D Texture;
 
         float NightEffect;
@@ -728,12 +732,13 @@ namespace Orts.Viewer3D
         public SignalLightGlowMaterial(Viewer viewer)
             : base(viewer, null)
         {
-            SceneryShader = Viewer.MaterialManager.SceneryShader;
             Texture = SharedTextureManager.Get(Viewer.GraphicsDevice, Path.Combine(Viewer.ContentPath, "SignalLightGlow.png"));
         }
 
         public override void SetState(GraphicsDevice graphicsDevice, Material previousMaterial)
         {
+            var SceneryShader = Viewer.MaterialManager.SceneryShader;
+
             SceneryShader.CurrentTechnique = Viewer.MaterialManager.SceneryShader.Techniques["SignalLightGlow"];
             SceneryShader.ImageTexture = Texture;
 
@@ -750,6 +755,9 @@ namespace Orts.Viewer3D
 
         public override void Render(GraphicsDevice graphicsDevice, IEnumerable<RenderItem> renderItems, ref Matrix XNAViewMatrix, ref Matrix XNAProjectionMatrix)
         {
+            if (Viewer.MaterialManager.DepthSensorActive) return;
+
+            var SceneryShader = Viewer.MaterialManager.SceneryShader as SceneryShader;
             foreach (var pass in SceneryShader.CurrentTechnique.Passes)
             {
                 foreach (var item in renderItems)

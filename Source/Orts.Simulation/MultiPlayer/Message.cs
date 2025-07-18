@@ -291,68 +291,90 @@ namespace Orts.MultiPlayer
         public MSGPlayer(string m)
         {
             string[] areas = m.Split('\r');
+            Console.WriteLine("PLAYER MSG AREAS");
+            Console.WriteLine("[{0}]", string.Join(", ", areas));
+
             if (areas.Length <= 6)
             {
                 throw new Exception("Parsing error in MSGPlayer" + m);
             }
-            try
+            Console.WriteLine("correct amount of areas");
+
+            var tmp = areas[0].Trim();
+            string[] data = tmp.Split(' ');
+            Console.WriteLine("split data");
+            user = data[0];
+            if (MPManager.IsServer() && !MPManager.Instance().AllowNewPlayer)//server does not want to have more people
             {
-                var tmp = areas[0].Trim();
-                string[] data = tmp.Split(' ');
-                user = data[0];
-                if (MPManager.IsServer() && !MPManager.Instance().AllowNewPlayer)//server does not want to have more people
-                {
-                    MPManager.BroadCast((new MSGMessage(user, "Error", "The dispatcher does not want to add more player")).ToString());
-                    throw (new Exception("Not want to add new player"));
-                }
-                code = data[1];
-                num = int.Parse(data[2]);
-                TileX = int.Parse(data[3]);
-                TileZ = int.Parse(data[4]);
-                X = float.Parse(data[5], CultureInfo.InvariantCulture);
-                Z = float.Parse(data[6], CultureInfo.InvariantCulture);
-                Travelled = float.Parse(data[7], CultureInfo.InvariantCulture);
-                trainmaxspeed = float.Parse(data[8], CultureInfo.InvariantCulture);
-                seconds = double.Parse(data[9], CultureInfo.InvariantCulture);
-                season = int.Parse(data[10]);
-                weather = int.Parse(data[11]);
-                pantofirst = int.Parse(data[12]);
-                pantosecond = int.Parse(data[13]);
-                pantothird = int.Parse(data[14]);
-                pantofourth = int.Parse(data[15]);
-                frontorrearcab = data[16];
-                headlight = int.Parse(data[17]);
-                //user = areas[0].Trim();
-                con = areas[2].Trim();
-                route = areas[3].Trim();
-                path = areas[4].Trim();
-                dir = int.Parse(areas[5].Trim());
-                url = areas[6].Trim();
-                ParseTrainCars(areas[7].Trim());
-                leadingID = areas[1].Trim();
-                int index = path.LastIndexOf("\\PATHS\\", StringComparison.OrdinalIgnoreCase);
-                if (index > 0)
-                {
-                    path = path.Remove(0, index + 7);
-                }
-                index = con.LastIndexOf("\\CONSISTS\\", StringComparison.OrdinalIgnoreCase);
-                if (index > 0)
-                {
-                    con = con.Remove(0, index + 10);
-                }
-                if (areas.Length >= 9) { version = int.Parse(areas[8]); }
-                if (areas.Length >= 10)
-                {
-                    MD5 = areas[9];
-                    if (MPManager.Instance().MD5Check == "")
-                    {
-                        MPManager.Instance().GetMD5HashFromTDBFile();
-                    }
-                }
+                MPManager.BroadCast((new MSGMessage(user, "Error", "The dispatcher does not want to add more player")).ToString());
+                throw (new Exception("Not want to add new player"));
             }
-            catch (Exception e)
+            Console.WriteLine("start parsing data");
+            code = data[1];
+            num = int.Parse(data[2]);
+            TileX = int.Parse(data[3]);
+            TileZ = int.Parse(data[4]);
+            X = float.Parse(data[5], CultureInfo.InvariantCulture);
+            Z = float.Parse(data[6], CultureInfo.InvariantCulture);
+            Console.WriteLine("location parsed");
+
+            Travelled = float.Parse(data[7], CultureInfo.InvariantCulture);
+            trainmaxspeed = float.Parse(data[8], CultureInfo.InvariantCulture);
+            seconds = double.Parse(data[9], CultureInfo.InvariantCulture);
+            season = int.Parse(data[10]);
+            weather = int.Parse(data[11]);
+            Console.WriteLine("weather data parsed");
+
+
+            pantofirst = int.Parse(data[12]);
+            pantosecond = int.Parse(data[13]);
+            pantothird = int.Parse(data[14]);
+            pantofourth = int.Parse(data[15]);
+            Console.WriteLine("panto parsed");
+
+            frontorrearcab = data[16];
+            headlight = int.Parse(data[17]);
+            Console.WriteLine("parsed Data");
+            //user = areas[0].Trim();
+            con = areas[2].Trim();
+            Console.WriteLine("parsed con");
+
+            route = areas[3].Trim();
+            Console.WriteLine("parsed route");
+
+            path = areas[4].Trim();
+            Console.WriteLine("parsed path: " + path);
+
+            dir = int.Parse(areas[5].Trim());
+            Console.WriteLine("parsed dir "+ areas[5].Trim());
+
+            url = areas[6].Trim();
+            Console.WriteLine("parsed url");
+
+            ParseTrainCars(areas[7].Trim());
+            Console.WriteLine("parsed train cars");
+
+            leadingID = areas[1].Trim();
+            Console.WriteLine("parsed leading id");
+
+            int index = path.LastIndexOf("\\PATHS\\", StringComparison.OrdinalIgnoreCase);
+            if (index > 0)
             {
-                throw e;
+                path = path.Remove(0, index + 7);
+            }
+            index = con.LastIndexOf("\\CONSISTS\\", StringComparison.OrdinalIgnoreCase);
+            if (index > 0)
+            {
+                con = con.Remove(0, index + 10);
+            }
+            if (areas.Length >= 9) { version = int.Parse(areas[8]); }
+            if (areas.Length >= 10)
+            {
+                MD5 = areas[9];
+                if (MPManager.Instance().MD5Check == "")
+                {
+                    MPManager.Instance().GetMD5HashFromTDBFile();
+                }
             }
         }
 
@@ -360,15 +382,27 @@ namespace Orts.MultiPlayer
         private void ParseTrainCars(string m)
         {
             string[] areas = m.Split('\t');
+            
+            Console.WriteLine("Consist section: "); ;
+            Console.WriteLine("[" + string.Join(", ", areas) + "]");
             var numCars = areas.Length;
+            Console.WriteLine("Number of cars: ");
+            Console.WriteLine(numCars);
             cars = new string[numCars];//with an empty "" at end
             ids = new string[numCars];
             flipped = new int[numCars];
             lengths = new int[numCars];
             fadiscretes = new string[numCars];
+
+            if (areas[0] == "")
+            {
+                return;
+            }
             int index, last;
             for (var i = 0; i < numCars; i++)
             {
+                Console.WriteLine("adding car number");
+                Console.WriteLine(i);
                 index = areas[i].IndexOf('\"');
                 last = areas[i].LastIndexOf('\"');
                 cars[i] = areas[i].Substring(index + 1, last - index - 1);

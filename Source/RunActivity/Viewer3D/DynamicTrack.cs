@@ -202,6 +202,7 @@ namespace Orts.Viewer3D
                 // Add all LODs from the smallest in-view CutOffRadius to the last
                 lastIndex = Primitive.TrProfile.LODs.Count - 1;
             }
+            frame.NextObject(ObjectClass.Track);
             while (lodIndex <= lastIndex)
             {
                 lod = (LOD)Primitive.TrProfile.LODs[lodIndex];

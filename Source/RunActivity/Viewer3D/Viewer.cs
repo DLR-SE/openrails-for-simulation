@@ -29,6 +29,7 @@ using GNU.Gettext;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
+using Newtonsoft.Json;
 using Orts.Common;
 using Orts.Formats.Msts;
 using Orts.MultiPlayer;
@@ -36,6 +37,7 @@ using Orts.Simulation;
 using Orts.Simulation.AIs;
 using Orts.Simulation.Physics;
 using Orts.Simulation.RollingStocks;
+using Orts.Viewer3D;
 using Orts.Viewer3D.Popups;
 using Orts.Viewer3D.Processes;
 using Orts.Viewer3D.RollingStock;
@@ -43,6 +45,8 @@ using ORTS.Common;
 using ORTS.Common.Input;
 using ORTS.Scripting.Api;
 using ORTS.Settings;
+using SharpFont;
+using static Orts.Simulation.Simulator;
 using Event = Orts.Common.Event;
 
 namespace Orts.Viewer3D
@@ -132,6 +136,8 @@ namespace Orts.Viewer3D
         public BrakemanCamera BrakemanCamera { get; private set; } // Camera 6
         public List<FreeRoamCamera> FreeRoamCameraList = new List<FreeRoamCamera>();
         public FreeRoamCamera FreeRoamCamera { get { return FreeRoamCameraList[0]; } } // Camera 8
+
+        public List<CameraSensor> CameraSensors { get; private set; }
 
         /// <summary>
         /// Activate the 2D or 3D cab camera depending on the current player preference.
@@ -281,16 +287,28 @@ namespace Orts.Viewer3D
             }
         }
 
+        public class JSONSensorDescription
+        {
+            public string sensorName { get; set; }
+            public string sensorType { get; set; }
+            public string trainName { get; set; }
+            public int height { get; set; }
+            public int width { get; set; }
+            public float fov { get; set; }
+            public float range { get; set; }
+
+        }
+
         /// <summary>
         /// Initializes a new instances of the <see cref="Viewer3D"/> class based on the specified <paramref name="simulator"/> and <paramref name="game"/>.
         /// </summary>
         /// <param name="simulator">The <see cref="Simulator"/> with which the viewer runs.</param>
         /// <param name="game">The <see cref="Game"/> with which the viewer runs.</param>
         [CallOnThread("Loader")]
-        public Viewer(Simulator simulator, Orts.Viewer3D.Processes.Game game)
+        public Viewer(Simulator simulator, Orts.Viewer3D.Processes.Game game, bool deterministic = true, String sensorConfig = "")
         {
             Catalog = new GettextResourceManager("RunActivity");
-            Random = new Random();
+            Random = deterministic ? new Random(0) : new Random();
             Simulator = simulator;
             Game = game;
             Settings = simulator.Settings;
@@ -313,6 +331,36 @@ namespace Orts.Viewer3D
             WellKnownCameras.Add(SpecialTracksideCamera = new SpecialTracksideCamera(this));
             WellKnownCameras.Add(new FreeRoamCamera(this, FrontCamera)); // Any existing camera will suffice to satisfy .Save() and .Restore()
             WellKnownCameras.Add(ThreeDimCabCamera = new ThreeDimCabCamera(this));
+
+            CameraSensors = new List<CameraSensor>();
+
+            if (sensorConfig != "")
+            {
+                string jsonContent = File.ReadAllText(sensorConfig);
+
+                // Deserialize JSON array into an array of objects
+                var sensors = JsonConvert.DeserializeObject<JSONSensorDescription[]>(jsonContent);
+                foreach (var sensorSpec in sensors)
+                {
+                    float aspectRatio = (float)sensorSpec.width / (float)sensorSpec.height;
+                    TrainCar sensorHost = simulator.NameDictionary[sensorSpec.trainName].LeadLocomotive;
+                    Camera sensorCamera = new OnTrainSensorCamera(this, aspectRatio, sensorHost); 
+                    if (sensorSpec.sensorType == "rgb")
+                    {
+                        CameraSensors.Add(new RGBCameraSensor(sensorSpec.sensorName, sensorCamera, sensorSpec.height, sensorSpec.width));
+                    } 
+                    else if (sensorSpec.sensorType == "depth")
+                    {
+                        CameraSensors.Add(new DepthSensor(sensorSpec.sensorName, sensorCamera, sensorSpec.height, sensorSpec.width, sensorSpec.range));
+                    } 
+                    else
+                    {
+                        Trace.TraceError("Unknown sensor type: " + sensorSpec.sensorType);
+                    }
+                }
+            
+
+            }
 
             string ORfilepath = System.IO.Path.Combine(Simulator.RoutePath, "OpenRails");
             ContentPath = Game.ContentPath;
@@ -529,6 +577,11 @@ namespace Orts.Viewer3D
             else
                 CameraActivate();
 
+            foreach (var sensor in CameraSensors)
+            {
+                sensor.Initialize();
+            }
+
             // Prepare the world to be loaded and then load it from the correct thread for debugging/tracing purposes.
             // This ensures that a) we have all the required objects loaded when the 3D view first appears and b) that
             // all loading is performed on a single thread that we can handle in debugging and tracing.
@@ -732,9 +785,19 @@ namespace Orts.Viewer3D
 
         [CallOnThread("Updater")]
         public void Update(RenderFrame frame, float elapsedRealTime)
-        {
+        { 
+            if (SyncSimulation.isSyncSimulation)
+            {
+                SyncSimulation.simulationSemaphore.Wait();
+            }
             RealTime += elapsedRealTime;
             var elapsedTime = new ElapsedTime(Simulator.GetElapsedClockSeconds(elapsedRealTime), elapsedRealTime);
+
+            foreach (var sensor in CameraSensors)
+            {
+                sensor.StoreData(frame);
+            }
+
 
             if (ComposeMessageWindow.Visible == true)
             {
@@ -808,6 +871,11 @@ namespace Orts.Viewer3D
 
             // Update camera first...
             Camera.Update(elapsedTime);
+            foreach (var sensor in CameraSensors)
+            {
+                sensor.Update(elapsedTime);
+            }
+
             // No above camera means we're allowed to auto-switch to cab view.
             if ((AbovegroundCamera == null) && Camera.IsUnderground)
             {
@@ -850,6 +918,10 @@ namespace Orts.Viewer3D
 
             frame.PrepareFrame(this);
             Camera.PrepareFrame(frame, elapsedTime);
+            foreach (var sensor in CameraSensors)
+            {
+                sensor.PrepareFrame(frame, elapsedTime);
+            }
             frame.PrepareFrame(elapsedTime);
             World.PrepareFrame(frame, elapsedTime);
             InfoDisplay.PrepareFrame(frame, elapsedTime);
@@ -857,6 +929,12 @@ namespace Orts.Viewer3D
             if (Simulator.ActivityRun != null) ActivityWindow.PrepareFrame(elapsedTime, true);
 
             WindowManager.PrepareFrame(frame, elapsedTime);
+            if (SyncSimulation.isSyncSimulation)
+            {
+                SyncSimulation.outputSemaphore.Release();
+            }
+
+
         }
 
         private void LoadDefectCarSound(TrainCar car, string filename)
@@ -881,6 +959,11 @@ namespace Orts.Viewer3D
         [CallOnThread("Updater")]
         void HandleUserInput(ElapsedTime elapsedTime)
         {
+            if (SyncSimulation.isSyncSimulation)
+            {
+                // Dynamically Updating the scenery is currently only supported in synced mode
+                World.Scenery.HandleUserInput();
+            }
             var train = Program.Viewer.PlayerLocomotive.Train;//DebriefEval
 
             if (UserInput.IsMouseLeftButtonDown || (Camera is ThreeDimCabCamera && RenderProcess.IsMouseVisible))

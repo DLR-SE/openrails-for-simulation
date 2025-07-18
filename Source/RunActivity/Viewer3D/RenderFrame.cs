@@ -1,4 +1,4 @@
-// COPYRIGHT 2009, 2010, 2011, 2012, 2013 by the Open Rails project.
+﻿// COPYRIGHT 2009, 2010, 2011, 2012, 2013 by the Open Rails project.
 // 
 // This file is part of Open Rails.
 // 
@@ -67,6 +67,18 @@ namespace Orts.Viewer3D
         Interior,
         Labels,
         Overlay
+    }
+
+    public enum ObjectClass
+    {
+        Unknown,
+        Terrain,
+        Track,
+        Train,
+        Car, 
+        Signal,
+        Custom1,
+        Custom2
     }
 
     public abstract class RenderPrimitive
@@ -146,14 +158,20 @@ namespace Orts.Viewer3D
         public Matrix XNAMatrix;
         public ShapeFlags Flags;
         public object ItemData;
+        public int ObjectIndex;
+        public ObjectClass ObjectClassifier;
 
-        public RenderItem(Material material, RenderPrimitive renderPrimitive, ref Matrix xnaMatrix, ShapeFlags flags, object itemData = null)
+
+        public RenderItem(Material material, RenderPrimitive renderPrimitive, ref Matrix xnaMatrix, ShapeFlags flags, object itemData = null, 
+            int objectIndex = 0, ObjectClass objectClassifier = ObjectClass.Unknown)
         {
             Material = material;
             RenderPrimitive = renderPrimitive;
             XNAMatrix = xnaMatrix;
             Flags = flags;
             ItemData = itemData;
+            ObjectIndex = objectIndex;
+            ObjectClassifier = objectClassifier;
         }
 
         public class Comparer : IComparer<RenderItem>
@@ -406,7 +424,13 @@ namespace Orts.Viewer3D
         Vector3 XNACameraLocation;
         Matrix XNACameraView;
         Matrix XNACameraProjection;
+        Viewer Viewer;
 
+        internal int CurrentObjectIndex;
+        internal ObjectClass CurrentClassifier;
+
+        public Dictionary<CameraSensor, CameraSensorRenderFrameData> SensorData = new Dictionary<CameraSensor, CameraSensorRenderFrameData>();
+        
         public RenderFrame(Game game)
         {
             Game = game;
@@ -463,6 +487,7 @@ namespace Orts.Viewer3D
                 Game.RenderProcess.GraphicsDevice.PresentationParameters.MultiSampleCount,
                 RenderTargetUsage.PreserveContents
             );
+            
         }
 
         public void Clear()
@@ -495,6 +520,8 @@ namespace Orts.Viewer3D
                     RenderShadowTerrainItems[shadowMapIndex].Clear();
                 }
             }
+            CurrentObjectIndex = 0;
+            CurrentClassifier = ObjectClass.Unknown;
         }
 
         public void PrepareFrame(Viewer viewer)
@@ -510,7 +537,9 @@ namespace Orts.Viewer3D
             if (ShadowMapMaterial == null)
                 ShadowMapMaterial = (ShadowMapMaterial)viewer.MaterialManager.Load("ShadowMap");
             if (SceneryShader == null)
-                SceneryShader = viewer.MaterialManager.SceneryShader;
+                SceneryShader = viewer.MaterialManager.SceneryShader as SceneryShader;
+            
+            Viewer = viewer;
         }
 
         public void SetCamera(Camera camera)
@@ -633,7 +662,7 @@ namespace Orts.Viewer3D
                     items = new RenderItemCollection();
                     sequence.Add(sortingMaterial, items);
                 }
-                items.Add(new RenderItem(material, primitive, ref xnaMatrix, flags, itemData));
+                items.Add(new RenderItem(material, primitive, ref xnaMatrix, flags, itemData, CurrentObjectIndex, CurrentClassifier));
             }
             if (((flags & ShapeFlags.AutoZBias) != 0) && (primitive.ZBias == 0))
                 primitive.ZBias = 1;
@@ -650,6 +679,12 @@ namespace Orts.Viewer3D
                 RenderShadowTerrainItems[shadowMapIndex].Add(new RenderItem(material, primitive, ref xnaMatrix, flags));
             else
                 Debug.Fail("Only scenery, forest and terrain materials allowed in shadow map.");
+        }
+
+        public void NextObject(ObjectClass objectClassifier)
+        {
+            CurrentObjectIndex++;
+            CurrentClassifier = objectClassifier;
         }
 
         [CallOnThread("Updater")]
@@ -724,13 +759,35 @@ namespace Orts.Viewer3D
                 Console.WriteLine("Draw {");
             }
 
+            
+                
+
             if (Game.Settings.DynamicShadows && (RenderProcess.ShadowMapCount > 0) && ShadowMapMaterial != null)
                 DrawShadows(graphicsDevice, logging);
 
             DrawSimple(graphicsDevice, logging);
+            
 
             for (var i = 0; i < (int)RenderPrimitiveSequence.Sentinel; i++)
                 Game.RenderProcess.PrimitiveCount[i] = RenderItems[i].Values.Sum(l => l.Count);
+
+            if (Viewer != null)
+            {
+                foreach (var sensor in Viewer.CameraSensors)
+                {
+                    DrawCameraSensor(graphicsDevice, sensor);
+                }
+
+            }
+            // drawing on the screen must be the last action
+            if (RenderSurfaceMaterial != null)
+            {
+                graphicsDevice.SetRenderTarget(null);
+                graphicsDevice.Clear(ClearOptions.Target | ClearOptions.DepthBuffer | ClearOptions.Stencil, Color.Transparent, 1, 0);
+                RenderSurfaceMaterial.SetState(graphicsDevice, null);
+                RenderSurfaceMaterial.SpriteBatch.Draw(RenderSurface, Vector2.Zero, Color.White);
+                RenderSurfaceMaterial.ResetState(graphicsDevice);
+            }
 
             if (logging)
             {
@@ -837,15 +894,6 @@ namespace Orts.Viewer3D
                 DrawSequences(graphicsDevice, logging);
                 if (logging) Console.WriteLine("  }");
             }
-
-            if (RenderSurfaceMaterial != null)
-            {
-                graphicsDevice.SetRenderTarget(null);
-                graphicsDevice.Clear(ClearOptions.Target | ClearOptions.DepthBuffer | ClearOptions.Stencil, Color.Transparent, 1, 0);
-                RenderSurfaceMaterial.SetState(graphicsDevice, null);
-                RenderSurfaceMaterial.SpriteBatch.Draw(RenderSurface, Vector2.Zero, Color.White);
-                RenderSurfaceMaterial.ResetState(graphicsDevice);
-            }
         }
 
         void DrawSequences(GraphicsDevice graphicsDevice, bool logging)
@@ -857,6 +905,8 @@ namespace Orts.Viewer3D
             renderItems.Clear();
             for (var i = 0; i < (int)RenderPrimitiveSequence.Sentinel; i++)
             {
+                if (Viewer != null && CameraSensor.CurrentSensor != null && (CameraSensor.CurrentSensor.RenderPrimitiveGroups & (i << i)) == 0) continue;
+                
                 if (logging) Console.WriteLine("    {0} {{", (RenderPrimitiveSequence)i);
                 var sequence = RenderItems[i];
                 foreach (var sequenceMaterial in sequence)
@@ -949,6 +999,48 @@ namespace Orts.Viewer3D
             }
         }
 
+        void DrawCameraSensor(GraphicsDevice graphicsDevice, CameraSensor sensor)
+        {
+            var oldSensor = CameraSensor.CurrentSensor;
+            CameraSensor.CurrentSensor = sensor;
+            XNACameraLocation = CameraLocation = SensorData[sensor].CameraLocation;
+            XNACameraLocation.Z *= -1;
+            XNACameraView = SensorData[sensor].XNACameraView;
+            XNACameraProjection = SensorData[sensor].XNACameraProjection;
+
+            if (SensorData[sensor].RenderTarget == null)
+            {
+                SensorData[sensor].RenderTarget = sensor.CreateRenderTarget(graphicsDevice);
+            }
+            if (sensor is DepthSensor)
+            {
+                graphicsDevice.SetRenderTarget(SensorData[sensor].RenderTarget);
+                if (Viewer.MaterialManager.SceneryShader is DepthSensorShader)
+                    ((DepthSensorShader)Viewer.MaterialManager.SceneryShader).MaxDistance = ((DepthSensor)sensor).MaxDistance;
+                graphicsDevice.Clear(ClearOptions.Target | ClearOptions.DepthBuffer | ClearOptions.Stencil, Color.Transparent, 1, 0);
+                DrawSequences(graphicsDevice, false);
+            }
+            else
+            {
+                Sort();
+                if (Game.Settings.DynamicShadows && (RenderProcess.ShadowMapCount > 0) && ShadowMapMaterial != null)
+                    DrawShadows(graphicsDevice, false);
+                graphicsDevice.SetRenderTarget(SensorData[sensor].RenderTarget);
+                if (Game.Settings.DistantMountains)
+                {
+                    graphicsDevice.Clear(ClearOptions.Target | ClearOptions.DepthBuffer | ClearOptions.Stencil, Color.Transparent, 1, 0);
+                    DrawSequencesDistantMountains(graphicsDevice, false);
+                    graphicsDevice.Clear(ClearOptions.DepthBuffer, Color.Transparent, 1, 0);
+                }
+                DrawSequences(graphicsDevice, false);
+            }
+
+            // graphicsDevice.SetRenderTarget(null);
+
+            CameraSensor.CurrentSensor = oldSensor;
+            
+        }
+
 #if DEBUG_RENDER_STATE
         static void DebugRenderState(GraphicsDevice graphicsDevice, string location)
         {
@@ -959,4 +1051,6 @@ namespace Orts.Viewer3D
         }
 #endif
     }
+
+    
 }

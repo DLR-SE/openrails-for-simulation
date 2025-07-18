@@ -96,6 +96,7 @@ namespace Orts.Simulation
             }
         }
         public float RotY { get { if (!locationSet) SetLocation(); return directionVector.Y; } }
+        public Vector3 Rotation { get { if (!locationSet) SetLocation(); return directionVector; } }
         public TrackNode TN { get { return trackNode; } }
 
         /// <summary>

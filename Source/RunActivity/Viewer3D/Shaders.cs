@@ -74,16 +74,88 @@ namespace Orts.Viewer3D
         public override void LogWarning(string helpLink, ContentIdentity contentIdentity, string message, params object[] messageArgs) => Console.WriteLine(message, messageArgs);
     }
 
-    [CallOnThread("Render")]
-    public class SceneryShader : Shader
+    public abstract class AbstractSceneryShader : Shader
     {
-        readonly EffectParameter world;
-        readonly EffectParameter view;
-        readonly EffectParameter projection;
+        protected readonly EffectParameter world;
+        protected readonly EffectParameter view;
+        protected readonly EffectParameter projection;
+        protected readonly EffectParameter viewerPos;
+        protected readonly EffectParameter eyeVector;
+        protected readonly EffectParameter sideVector;
+        protected readonly EffectParameter imageTexture;
+        protected readonly EffectParameter referenceAlpha;
+        protected readonly EffectParameter zBias_Lighting;
+        protected Vector3 _eyeVector;
+        protected Vector4 _zBias_Lighting;
+
+
+        public Vector3 ViewerPos { set { if (viewerPos != null) viewerPos.SetValue(value); } }
+
+        public Texture2D ImageTexture { set { imageTexture.SetValue(value); } }
+
+        public int ReferenceAlpha { set { referenceAlpha.SetValue(value / 255f); } }
+
+        public virtual bool ImageTextureIsNight { set {} }
+
+        public float ZBias { get { return _zBias_Lighting.X; } set { _zBias_Lighting.X = value; zBias_Lighting.SetValue(_zBias_Lighting); } }
+        public float LightingDiffuse { get { return _zBias_Lighting.Y; } set { _zBias_Lighting.Y = value; zBias_Lighting.SetValue(_zBias_Lighting); } }
+        public float LightingSpecular
+        {
+            get { return _zBias_Lighting.Z; }
+            set
+            {
+                // Setting this exponent of HLSL pow() function to 0 in DX11 leads to undefined result. (HLSL bug?)
+                _zBias_Lighting.Z = value >= 1 ? value : 1;
+                _zBias_Lighting.W = value >= 1 ? 1 : 0;
+                zBias_Lighting.SetValue(_zBias_Lighting);
+            }
+        }
+        public virtual void SetViewMatrix(ref Matrix v)
+        {
+            _eyeVector = Vector3.Normalize(new Vector3(v.M13, v.M23, v.M33));
+
+            if (eyeVector != null) eyeVector.SetValue(new Vector4(_eyeVector, 0.0f));
+            if (sideVector != null) sideVector.SetValue(Vector3.Normalize(Vector3.Cross(_eyeVector, Vector3.Down)));
+        }
+
+        public virtual void SetMatrix(Matrix w, ref Matrix v, ref Matrix p)
+        {
+            world.SetValue(w);
+            view.SetValue(v);
+            projection.SetValue(p);
+        }
+
+        public virtual void SetShadowMap(Matrix[] shadowProjections, Texture2D[] textures, float[] limits)
+        {
+         
+        }
+
+        public virtual void ClearShadowMap()
+        {
+            
+        }
+
+
+        protected AbstractSceneryShader(GraphicsDevice graphicsDevice, string filename) : base(graphicsDevice, filename)
+        {
+            world = Parameters["World"];
+            view = Parameters["View"];
+            projection = Parameters["Projection"];
+            viewerPos = Parameters["ViewerPos"];
+            eyeVector = Parameters["EyeVector"];
+            sideVector = Parameters["SideVector"];
+            imageTexture = Parameters["ImageTexture"];
+            referenceAlpha = Parameters["ReferenceAlpha"];
+            zBias_Lighting = Parameters["ZBias_Lighting"];
+
+        }
+    }
+    [CallOnThread("Render")]
+    public class SceneryShader : AbstractSceneryShader
+    {
         readonly EffectParameter[] lightViewProjectionShadowProjection;
         readonly EffectParameter[] shadowMapTextures;
         readonly EffectParameter shadowMapLimit;
-        readonly EffectParameter zBias_Lighting;
         readonly EffectParameter fog;
         readonly EffectParameter lightVector_ZFar;
         readonly EffectParameter headlightPosition;
@@ -91,25 +163,19 @@ namespace Orts.Viewer3D
         readonly EffectParameter headlightRcpDistance;
         readonly EffectParameter headlightColor;
         readonly EffectParameter overcast;
-        readonly EffectParameter viewerPos;
         readonly EffectParameter imageTextureIsNight;
         readonly EffectParameter nightColorModifier;
         readonly EffectParameter halfNightColorModifier;
         readonly EffectParameter vegetationAmbientModifier;
         readonly EffectParameter signalLightIntensity;
-        readonly EffectParameter eyeVector;
-        readonly EffectParameter sideVector;
-        readonly EffectParameter imageTexture;
         readonly EffectParameter overlayTexture;
-        readonly EffectParameter referenceAlpha;
         readonly EffectParameter overlayScale;
 
-        Vector3 _eyeVector;
-        Vector4 _zBias_Lighting;
         Vector3 _sunDirection;
-        bool _imageTextureIsNight;
+        Boolean _imageTextureIsNight = false;
 
-        public void SetViewMatrix(ref Matrix v)
+
+        public override void SetViewMatrix(ref Matrix v)
         {
             _eyeVector = Vector3.Normalize(new Vector3(v.M13, v.M23, v.M33));
 
@@ -117,7 +183,7 @@ namespace Orts.Viewer3D
             sideVector.SetValue(Vector3.Normalize(Vector3.Cross(_eyeVector, Vector3.Down)));
         }
 
-        public void SetMatrix(Matrix w, ref Matrix v, ref Matrix p)
+        public override void SetMatrix(Matrix w, ref Matrix v, ref Matrix p)
         {
             world.SetValue(w);
             view.SetValue(v);
@@ -152,7 +218,7 @@ namespace Orts.Viewer3D
             }
         }
 
-        public void SetShadowMap(Matrix[] shadowProjections, Texture2D[] textures, float[] limits)
+        public override void SetShadowMap(Matrix[] shadowProjections, Texture2D[] textures, float[] limits)
         {
             for (var i = 0; i < RenderProcess.ShadowMapCount; i++)
             {
@@ -162,24 +228,12 @@ namespace Orts.Viewer3D
             shadowMapLimit.SetValue(new Vector4(limits[0], limits.Length > 1 ? limits[1] : 0, limits.Length > 2 ? limits[2] : 0, limits.Length > 3 ? limits[3] : 0));
         }
 
-        public void ClearShadowMap()
+        public override void ClearShadowMap()
         {
             shadowMapLimit.SetValue(Vector4.Zero);
         }
 
-        public float ZBias { get { return _zBias_Lighting.X; } set { _zBias_Lighting.X = value; zBias_Lighting.SetValue(_zBias_Lighting); } }
-        public float LightingDiffuse { get { return _zBias_Lighting.Y; } set { _zBias_Lighting.Y = value; zBias_Lighting.SetValue(_zBias_Lighting); } }
-        public float LightingSpecular
-        {
-            get { return _zBias_Lighting.Z; }
-            set
-            {
-                // Setting this exponent of HLSL pow() function to 0 in DX11 leads to undefined result. (HLSL bug?)
-                _zBias_Lighting.Z = value >= 1 ? value : 1;
-                _zBias_Lighting.W = value >= 1 ? 1 : 0;
-                zBias_Lighting.SetValue(_zBias_Lighting);
-            }
-        }
+        
 
         public void SetFog(float depth, ref Color color)
         {
@@ -211,24 +265,15 @@ namespace Orts.Viewer3D
 
         public float Overcast { set { overcast.SetValue(new Vector2(value, value / 2)); } }
 
-        public Vector3 ViewerPos { set { viewerPos.SetValue(value); } }
+        public override bool ImageTextureIsNight { set { _imageTextureIsNight = value; imageTextureIsNight.SetValue(value ? 1f : 0f); } }
 
-        public bool ImageTextureIsNight { set { _imageTextureIsNight = value; imageTextureIsNight.SetValue(value ? 1f : 0f); } }
-
-        public Texture2D ImageTexture { set { imageTexture.SetValue(value); } }
-
-        public Texture2D OverlayTexture { set { overlayTexture.SetValue(value); } }
-
-        public int ReferenceAlpha { set { referenceAlpha.SetValue(value / 255f); } }
+        public Texture2D OverlayTexture { set { if (overlayTexture != null) overlayTexture.SetValue(value); } }
 
         public float OverlayScale { set { overlayScale.SetValue(value); } }
 
         public SceneryShader(GraphicsDevice graphicsDevice)
             : base(graphicsDevice, "SceneryShader")
         {
-            world = Parameters["World"];
-            view = Parameters["View"];
-            projection = Parameters["Projection"];
             lightViewProjectionShadowProjection = new EffectParameter[RenderProcess.ShadowMapCountMaximum];
             shadowMapTextures = new EffectParameter[RenderProcess.ShadowMapCountMaximum];
             for (var i = 0; i < RenderProcess.ShadowMapCountMaximum; i++)
@@ -237,7 +282,6 @@ namespace Orts.Viewer3D
                 shadowMapTextures[i] = Parameters["ShadowMapTexture" + i];
             }
             shadowMapLimit = Parameters["ShadowMapLimit"];
-            zBias_Lighting = Parameters["ZBias_Lighting"];
             fog = Parameters["Fog"];
             lightVector_ZFar = Parameters["LightVector_ZFar"];
             headlightPosition = Parameters["HeadlightPosition"];
@@ -245,17 +289,12 @@ namespace Orts.Viewer3D
             headlightRcpDistance = Parameters["HeadlightRcpDistance"];
             headlightColor = Parameters["HeadlightColor"];
             overcast = Parameters["Overcast"];
-            viewerPos = Parameters["ViewerPos"];
             imageTextureIsNight = Parameters["ImageTextureIsNight"];
             nightColorModifier = Parameters["NightColorModifier"];
             halfNightColorModifier = Parameters["HalfNightColorModifier"];
             vegetationAmbientModifier = Parameters["VegetationAmbientModifier"];
             signalLightIntensity = Parameters["SignalLightIntensity"];
-            eyeVector = Parameters["EyeVector"];
-            sideVector = Parameters["SideVector"];
-            imageTexture = Parameters["ImageTexture"];
             overlayTexture = Parameters["OverlayTexture"];
-            referenceAlpha = Parameters["ReferenceAlpha"];
             overlayScale = Parameters["OverlayScale"];
         }
     }
@@ -733,5 +772,30 @@ namespace Orts.Viewer3D
         {
             worldViewProjection.SetValue(matrix * viewproj);
         }
+    }
+
+    public class DepthSensorShader : AbstractSceneryShader
+    {
+
+        readonly EffectParameter baseIntensity;
+        readonly EffectParameter objectClassifier;
+        readonly EffectParameter maxDistance;
+        readonly EffectParameter trackClipping;
+
+        public float BaseIntensity {  set { baseIntensity.SetValue(value); } }
+        public float ObjectClassifier { set { objectClassifier.SetValue(value); } }
+        public float MaxDistance { set { maxDistance.SetValue(value); } }
+
+        public bool TrackClipping{ set { trackClipping.SetValue(value); } }
+
+        public DepthSensorShader(GraphicsDevice graphicsDevice)
+            : base(graphicsDevice, "DepthSensorShader")
+        {
+            baseIntensity = Parameters["BaseIntensity"];
+            objectClassifier = Parameters["ObjectClassifier"];
+            maxDistance = Parameters["MaxDistance"];
+            trackClipping = Parameters["TrackClipping"];
+        }
+
     }
 }

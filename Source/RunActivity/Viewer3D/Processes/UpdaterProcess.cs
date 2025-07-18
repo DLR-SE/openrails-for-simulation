@@ -42,7 +42,10 @@ namespace Orts.Viewer3D.Processes
 
         public void Start()
         {
-            Game.WatchdogProcess.Register(WatchdogToken);
+            if (!SyncSimulation.isSyncSimulation)
+            {
+                Game.WatchdogProcess.Register(WatchdogToken);
+            }
             Thread.Start();
         }
 
@@ -88,7 +91,8 @@ namespace Orts.Viewer3D.Processes
         [CallOnThread("Render")]
         internal void StartUpdate(RenderFrame frame, double totalRealSeconds)
         {
-            Debug.Assert(State.Finished);
+            State.WaitTillFinished();
+            Debug.Assert(State.Finished); // TODO the application eventually throws an exception here in the scottish capital express scenario with webserver inputs
             CurrentFrame = frame;
             TotalRealSeconds = totalRealSeconds;
             State.SignalStart();
@@ -128,6 +132,8 @@ namespace Orts.Viewer3D.Processes
                 CurrentFrame.Clear();
                 if (Game.State != null)
                 {
+                    
+
                     Game.State.Update(CurrentFrame, TotalRealSeconds);
                     CurrentFrame.Sort();
                 }

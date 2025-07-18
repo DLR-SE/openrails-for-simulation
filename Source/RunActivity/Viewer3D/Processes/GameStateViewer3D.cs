@@ -30,11 +30,17 @@ namespace Orts.Viewer3D.Processes
         bool FirstFrame = true;
         int ProfileFrames = 0;
 
-        public GameStateViewer3D(Viewer viewer)
+        public GameStateViewer3D(Viewer viewer, bool pausedAtStart = true)
         {
+            // TODO the webserver in original form blocks until this is reached, maybe find a better solution
             Viewer = viewer;
-            Viewer.Simulator.Paused = true;
-            Viewer.QuitWindow.Visible = true;
+            
+
+            Viewer.Simulator.Paused = SyncSimulation.pauseAtGameStart || pausedAtStart;
+            Viewer.QuitWindow.Visible = SyncSimulation.pauseAtGameStart || pausedAtStart;
+
+            Console.WriteLine("paused at start: ");
+            Console.WriteLine(pausedAtStart);
         }
 
         internal override void BeginRender(RenderFrame frame)
@@ -93,7 +99,8 @@ namespace Orts.Viewer3D.Processes
                 LastTotalRealSeconds = totalRealSeconds;
             // We would like to avoid any large jumps in the simulation, so
             // this is a 4FPS minimum, 250ms maximum update time.
-            else if (totalRealSeconds - LastTotalRealSeconds > 0.25f)
+            // This only applies for game mode, we allow bigger jump with the synced simulation
+            else if (totalRealSeconds - LastTotalRealSeconds > 0.25f && !SyncSimulation.isSyncSimulation)
                 LastTotalRealSeconds = totalRealSeconds;
 
             var elapsedRealTime = totalRealSeconds - LastTotalRealSeconds;

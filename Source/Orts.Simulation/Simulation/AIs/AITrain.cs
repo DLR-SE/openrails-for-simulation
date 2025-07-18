@@ -611,7 +611,8 @@ namespace Orts.Simulation.AIs
         private void RandomizeEfficiency (ref float efficiency)
         {
             efficiency *= 100;
-            var incOrDecEfficiency = DateTime.Now.Millisecond % 2 == 0 ? true : false;
+            // var incOrDecEfficiency = DateTime.Now.Millisecond % 2 == 0 ? true : false;
+            var incOrDecEfficiency = true;
             if (incOrDecEfficiency) efficiency = Math.Min(100, efficiency + RandomizedDelayWithThreshold(20)); // increment it
             else if (efficiency > 50) efficiency = Math.Max(50, efficiency - RandomizedDelayWithThreshold(20)); // decrement it
             efficiency /= 100;
@@ -6845,7 +6846,8 @@ namespace Orts.Simulation.AIs
             if (!durationS.HasValue)
             {
                 // Sound the horn for a pseudorandom period of seconds between 2 and 5.
-                durationS = (DateTime.Now.Millisecond % 10) / 3 + 2;
+                // durationS = (DateTime.Now.Millisecond % 10) / 3 + 2;
+                durationS = 3;
             }
 
             locomotive.ManualHorn = true;

@@ -17,6 +17,7 @@
 
 using GNU.Gettext;
 using Microsoft.Xna.Framework;
+using Newtonsoft.Json;
 using Orts.Common;
 using Orts.Common.Scripting;
 using Orts.Formats.Msts;
@@ -118,6 +119,7 @@ namespace Orts.Simulation
         public SignalConfigurationFile SIGCFG;
         public string ExplorePathFile;
         public string ExploreConFile;
+        public string OtherTrainDefinition;
         public string patFileName;
         public string conFileName;
         public AIPath PlayerPath;
@@ -176,6 +178,10 @@ namespace Orts.Simulation
         public readonly bool MilepostUnitsMetric;
         public bool OpenDoorsInAITrains;
 
+        // DLR Synchronous Simulation
+        public TimeSpan simStepSeconds = TimeSpan.FromMilliseconds(200);
+        public bool isSyncSimulation = true;
+
         public int ActiveMovingTableIndex = -1;
         public MovingTable ActiveMovingTable
         {
@@ -226,6 +232,14 @@ namespace Orts.Simulation
             public bool SuspendOldPlayer;
         }
 
+        public class JSONTrainDescription
+        {
+            public int trainNumber { get; set; }
+            public string trainName { get; set; }
+            public string trainConfig { get; set; }
+            public string trainPath { get; set; }
+        }
+
         public readonly TrainSwitcherData TrainSwitcher = new TrainSwitcherData();
 
         public class PlayerTrainChangedEventArgs : EventArgs
@@ -260,7 +274,7 @@ namespace Orts.Simulation
 
         public float TimetableLoadedFraction = 0.0f;    // Set by AI.PrerunAI(), Get by GameStateRunActivity.Update()
 
-        public Simulator(UserSettings settings, string activityPath, bool useOpenRailsDirectory, bool deterministic = false)
+        public Simulator(UserSettings settings, string activityPath, bool useOpenRailsDirectory, bool deterministic = true)
         {
             Catalog = new GettextResourceManager("Orts.Simulation");
             Random = deterministic ? new Random(0) : new Random();
@@ -409,6 +423,20 @@ namespace Orts.Simulation
         {
             ExplorePathFile = path;
             ExploreConFile = consist;
+            patFileName = Path.ChangeExtension(path, "PAT");
+            conFileName = Path.ChangeExtension(consist, "CON");
+            var time = start.Split(':');
+            TimeSpan StartTime = new TimeSpan(int.Parse(time[0]), time.Length > 1 ? int.Parse(time[1]) : 0, time.Length > 2 ? int.Parse(time[2]) : 0);
+            ClockTime = StartTime.TotalSeconds;
+            Season = (SeasonType)int.Parse(season);
+            WeatherType = (WeatherType)int.Parse(weather);
+        }
+
+        public void SetSyncSimulation(string path, string consist, string start, string season, string weather, string otherTrainDefinition = "")
+        {
+            ExplorePathFile = path;
+            ExploreConFile = consist;
+            OtherTrainDefinition = otherTrainDefinition;
             patFileName = Path.ChangeExtension(path, "PAT");
             conFileName = Path.ChangeExtension(consist, "CON");
             var time = start.Split(':');
@@ -585,14 +613,11 @@ namespace Orts.Simulation
         Train InitializeTrains(CancellationToken cancellation)
         {
             Train playerTrain = InitializePlayerTrain();
+            if (OtherTrainDefinition != null && OtherTrainDefinition != "") {
+             InitializeNonEgoTrains();
+            }
             InitializeStaticConsists();
             AI = new AI(this, cancellation, ClockTime);
-            if (playerTrain != null)
-            {
-                var validPosition = playerTrain.PostInit();
-                TrainDictionary.Add(playerTrain.Number, playerTrain);
-                NameDictionary.Add(playerTrain.Name, playerTrain);
-            }
             return (playerTrain);
         }
 
@@ -816,6 +841,10 @@ namespace Orts.Simulation
                 if ((train.SpeedMpS != 0 || (train.ControlMode == Train.TRAIN_CONTROL.EXPLORER && train.TrainType == Train.TRAINTYPE.REMOTE && MPManager.IsServer())) &&
                     train.GetType() != typeof(AITrain) && train.GetType() != typeof(TTTrain) &&
                     (PlayerLocomotive == null || train != PlayerLocomotive.Train))
+                {
+                    movingTrains.Add(train);
+                }
+                else if (train.Name != "PLAYER" && train.TrainType == Train.TRAINTYPE.PLAYER)
                 {
                     movingTrains.Add(train);
                 }
@@ -1347,11 +1376,182 @@ namespace Orts.Simulation
             train.AITrainBrakePercent = 100; //<CSComment> This seems a tricky way for the brake modules to test if it is an AI train or not
             train.EqualReservoirPressurePSIorInHg = prevEQres; // The previous command modifies EQ reservoir pressure, causing issues with EP brake systems, so restore to prev value
 
-//            if ((PlayerLocomotive as MSTSLocomotive).EOTEnabled != MSTSLocomotive.EOTenabled.no)
-//                train.EOT = new EOT((PlayerLocomotive as MSTSLocomotive).EOTEnabled, false, train);
+            //            if ((PlayerLocomotive as MSTSLocomotive).EOTEnabled != MSTSLocomotive.EOTenabled.no)
+            //                train.EOT = new EOT((PlayerLocomotive as MSTSLocomotive).EOTEnabled, false, train);
 
+
+            var validPosition = train.PostInit();
+            TrainDictionary.Add(train.Number, train);
+            NameDictionary.Add(train.Name, train);
             return (train);
         }
+
+        private void InitializeNonEgoTrains()
+        {
+            string jsonContent = File.ReadAllText(OtherTrainDefinition);
+
+            // Deserialize JSON array into an array of objects
+            var trains = JsonConvert.DeserializeObject<JSONTrainDescription[]>(jsonContent);
+
+            // Process each train object
+            foreach (var train in trains)
+            {
+                InitializeNonEgoTrain(train.trainNumber, train.trainName, train.trainConfig, train.trainPath);
+            }
+        }
+
+        private Train InitializeNonEgoTrain(int trainNumber, string trainName, string trainConfig, string trainPath)
+        {
+            Debug.Assert(Trains != null, "Cannot InitializeNonEgoTrain() without Simulator.Trains.");
+            // set up the player locomotive
+
+            Train train = new Train(this);
+            train.TrainType = Train.TRAINTYPE.PLAYER;
+            train.Number = trainNumber; // TODO figure out train number
+            train.Name = trainName; // Figure out train name
+
+            string playerServiceFileName;
+            ServiceFile srvFile;
+            playerServiceFileName = Path.GetFileNameWithoutExtension(trainConfig);
+            srvFile = new ServiceFile();
+            srvFile.Name = playerServiceFileName;
+            srvFile.Train_Config = playerServiceFileName;
+            srvFile.PathID = Path.GetFileNameWithoutExtension(ExplorePathFile);
+            conFileName = BasePath + @"\TRAINS\CONSISTS\" + srvFile.Train_Config + ".CON"; // TODO different source for non ego consist
+            patFileName = RoutePath + @"\PATHS\" + trainPath + ".PAT"; // TODO different source for non ego path (now just player path plus 1)
+
+            //OriginalPlayerTrain = train;
+
+            if (conFileName.Contains("tilted")) train.IsTilting = true;
+
+#if ACTIVITY_EDITOR
+            AIPath aiPath = new AIPath(TDB, TSectionDat, patFileName, TimetableMode, orRouteConfig);
+#else
+            AIPath aiPath = new AIPath(TDB, TSectionDat, patFileName);
+#endif
+            PathName = aiPath.pathName;
+
+            if (aiPath.Nodes == null)
+            {
+                throw new InvalidDataException("Broken path " + patFileName + " for Player train - activity cannot be started");
+            }
+
+            // place rear of train on starting location of aiPath.
+            train.RearTDBTraveller = new Traveller(TSectionDat, TDB.TrackDB.TrackNodes, aiPath);
+
+            ConsistFile conFile = new ConsistFile(conFileName);
+            CurveDurability = conFile.Train.TrainCfg.Durability;   // Finds curve durability of consist based upon the value in consist file
+            train.TcsParametersFileName = conFile.Train.TrainCfg.TcsParametersFileName;
+
+            // add wagons
+            foreach (Wagon wagon in conFile.Train.TrainCfg.WagonList)
+            {
+                string wagonFolder = BasePath + @"\trains\trainset\" + wagon.Folder;
+                string wagonFilePath = wagonFolder + @"\" + wagon.Name + ".wag"; ;
+                if (wagon.IsEngine)
+                    wagonFilePath = Path.ChangeExtension(wagonFilePath, ".eng");
+                else if (wagon.IsEOT)
+                {
+                    wagonFolder = BasePath + @"\trains\orts_eot\" + wagon.Folder;
+                    wagonFilePath = wagonFolder + @"\" + wagon.Name + ".eot";
+                }
+
+                if (!File.Exists(wagonFilePath))
+                {
+                    // First wagon is the player's loco and required, so issue a fatal error message
+                    if (wagon == conFile.Train.TrainCfg.WagonList[0])
+                        Trace.TraceError("Player's locomotive {0} cannot be loaded in {1}", wagonFilePath, conFileName);
+                    Trace.TraceWarning($"Ignored missing {(wagon.IsEngine ? "engine" : "wagon")} {wagonFilePath} in consist {conFileName}");
+                    continue;
+                }
+
+                try
+                {
+                    TrainCar car = RollingStock.Load(this, train, wagonFilePath);
+                    car.Flipped = wagon.Flip;
+                    car.UiD = wagon.UiD;
+                    if (MPManager.IsMultiPlayer())
+                        car.CarID = MPManager.GetUserName() + " - " + car.UiD;
+                    else
+                        car.CarID = trainNumber + " - " + car.UiD; 
+                    if (car is EOT) train.EOT = car as EOT;
+                    car.FreightAnimations?.Load(wagon.LoadDataList);
+
+                    train.Length += car.CarLengthM;
+
+                    var mstsDieselLocomotive = car as MSTSDieselLocomotive;
+                    if (Activity != null && mstsDieselLocomotive != null)
+                        mstsDieselLocomotive.DieselLevelL = mstsDieselLocomotive.MaxDieselLevelL * Activity.Tr_Activity.Tr_Activity_Header.FuelDiesel / 100.0f;
+
+                    var mstsSteamLocomotive = car as MSTSSteamLocomotive;
+                    if (Activity != null && mstsSteamLocomotive != null)
+                    {
+                        mstsSteamLocomotive.CombinedTenderWaterVolumeUKG = (Kg.ToLb(mstsSteamLocomotive.MaxLocoTenderWaterMassKG) / 10.0f) * Activity.Tr_Activity.Tr_Activity_Header.FuelWater / 100.0f;
+                        mstsSteamLocomotive.TenderCoalMassKG = mstsSteamLocomotive.MaxTenderCoalMassKG * Activity.Tr_Activity.Tr_Activity_Header.FuelCoal / 100.0f;
+                    }
+                }
+                catch (Exception error)
+                {
+                    // First wagon is the player's loco and required, so issue a fatal error message
+                    if (wagon == conFile.Train.TrainCfg.WagonList[0])
+                        throw new FileLoadException(wagonFilePath, error);
+                    Trace.WriteLine(new FileLoadException(wagonFilePath, error));
+                }
+            }// for each rail car
+
+            train.CheckFreight();
+            train.SetDPUnitIDs();
+
+            train.PresetExplorerPath(aiPath, Signals);
+            train.ControlMode = Train.TRAIN_CONTROL.EXPLORER;
+
+            bool canPlace = true;
+            Train.TCSubpathRoute tempRoute = train.CalculateInitialTrainPosition(ref canPlace);
+            if (tempRoute.Count == 0 || !canPlace)
+            {
+                throw new InvalidDataException("Player train original position not clear");
+            }
+
+            train.SetInitialTrainRoute(tempRoute);
+            train.CalculatePositionOfCars();
+            train.ResetInitialTrainRoute(tempRoute);
+
+            train.CalculatePositionOfCars();
+            Trains.Add(train);
+
+            // Note the initial position to be stored by a Save and used in Menu.exe to calculate DistanceFromStartM 
+            InitialTileX = Trains[0].FrontTDBTraveller.TileX + (Trains[0].FrontTDBTraveller.X / 2048);
+            InitialTileZ = Trains[0].FrontTDBTraveller.TileZ + (Trains[0].FrontTDBTraveller.Z / 2048);
+
+            // PlayerLocomotive = InitialPlayerLocomotive(); // TODO probably only handles player train stuff, remove if proven unnecessary
+            if ((conFile.Train.TrainCfg.MaxVelocity == null) ||
+                ((conFile.Train.TrainCfg.MaxVelocity != null) && ((conFile.Train.TrainCfg.MaxVelocity.A <= 0f) || (conFile.Train.TrainCfg.MaxVelocity.A == 40f))))
+                train.TrainMaxSpeedMpS = Math.Min((float)TRK.Tr_RouteFile.SpeedLimit, ((MSTSLocomotive)PlayerLocomotive).MaxSpeedMpS);
+            else
+                train.TrainMaxSpeedMpS = Math.Min((float)TRK.Tr_RouteFile.SpeedLimit, conFile.Train.TrainCfg.MaxVelocity.A);
+
+            float prevEQres = train.EqualReservoirPressurePSIorInHg;
+            train.AITrainBrakePercent = 100; //<CSComment> This seems a tricky way for the brake modules to test if it is an AI train or not
+            train.EqualReservoirPressurePSIorInHg = prevEQres; // The previous command modifies EQ reservoir pressure, causing issues with EP brake systems, so restore to prev value
+
+            //            if ((PlayerLocomotive as MSTSLocomotive).EOTEnabled != MSTSLocomotive.EOTenabled.no)
+            //                train.EOT = new EOT((PlayerLocomotive as MSTSLocomotive).EOTEnabled, false, train);
+
+            // TODO for the player train, this is done in a separate function, maybe outsource this as well
+            foreach (TrainCar car in train.Cars)
+                if (car.IsDriveable)  // first loco is the one the player drives
+                {
+                    train.LeadLocomotive = car;
+                    train.InitializeBrakes();
+                    PlayerLocomotive.LocalThrottlePercent = train.AITrainThrottlePercent;
+                    break;
+                }
+            var validPosition = train.PostInit();
+            TrainDictionary.Add(train.Number, train);
+            NameDictionary.Add(train.Name, train);
+            return (train);
+        }
+
 
         // used for activity and activity in explore mode; creates the train within the AITrain class
         private AITrain InitializeAPPlayerTrain()

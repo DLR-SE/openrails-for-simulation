@@ -19,7 +19,9 @@
 //#define DEBUG_LOADING
 
 using Microsoft.Xna.Framework;
+using System.Diagnostics;
 using Microsoft.Xna.Framework.Graphics;
+using Newtonsoft.Json.Linq;
 using Orts.Common;
 using Orts.Formats.Msts;
 using Orts.MultiPlayer;
@@ -41,8 +43,9 @@ namespace Orts.Viewer3D.Processes
     public class GameStateRunActivity : GameState
     {
         static string[] Arguments;
+        static bool StartPaused = false;
         static string Acttype;
-        static Simulator Simulator { get { return Program.Simulator; } set { Program.Simulator = value; } }
+        public static Simulator Simulator { get { return Program.Simulator; } set { Program.Simulator = value; } }
 
         //for Multiplayer
         static Server Server { get { return MPManager.Server; } set { MPManager.Server = value; } }
@@ -54,6 +57,8 @@ namespace Orts.Viewer3D.Processes
         static ORTraceListener ORTraceListener { get { return Program.ORTraceListener; } set { Program.ORTraceListener = value; } }
         static string logFileName { get { return Program.logFileName; } set { Program.logFileName = value; } }
         static string EvaluationFilename { get { return Program.EvaluationFilename; } set { Program.EvaluationFilename = value; } }
+
+        string SensorConfig = "";
 
         /// <summary>
         /// A set of save files all have the same filestem but a specific extension:
@@ -104,9 +109,10 @@ namespace Orts.Viewer3D.Processes
         TimetableLoadingBarPrimitive TimetableLoadingBar;
         Matrix LoadingMatrix = Matrix.Identity;
 
-        public GameStateRunActivity(string[] args)
+        public GameStateRunActivity(string[] args, bool startPaused = false)
         {
             Arguments = args;
+            StartPaused = startPaused;
         }
 
         internal override void Dispose()
@@ -173,7 +179,7 @@ namespace Orts.Viewer3D.Processes
 
             // Look for required type of action
             var acttype = "";
-            var acttypes = new[] { "activity", "explorer", "exploreactivity", "timetable" };
+            var acttypes = new[] { "activity", "explorer", "syncsimulaton", "exploreactivity", "timetable" };
             foreach (var possibleActType in acttypes)
                 if (args.Contains("-" + possibleActType) || args.Contains("/" + possibleActType, StringComparer.OrdinalIgnoreCase))
                     acttype = possibleActType;
@@ -305,7 +311,7 @@ namespace Orts.Viewer3D.Processes
                         else
                         {
                             var errorSummary = error.GetType().FullName + ": " + error.Message;
-                            var logFile = Path.Combine(settings.LoggingPath, settings.LoggingFilename);
+                            var logFile = Path.Combine(settings.LoggingPath, string.Format("{0}-{1}.txt", settings.LoggingFilename, settings.WebServerPort));
                             var openTracker = MessageBox.Show(String.Format(
                                     "A fatal error has occured and {0} cannot continue.\n\n" +
                                     "    {1}\n\n" +
@@ -361,9 +367,9 @@ namespace Orts.Viewer3D.Processes
                 if (cancellation.IsCancellationRequested) return;
             }
 
-            Viewer = new Viewer(Simulator, Game);
+            Viewer = new Viewer(Simulator, Game, true, SensorConfig);
 
-            Game.ReplaceState(new GameStateViewer3D(Viewer));
+            Game.ReplaceState(new GameStateViewer3D(Viewer, StartPaused));
         }
 
         /// <summary>
@@ -534,7 +540,7 @@ namespace Orts.Viewer3D.Processes
                 // Reload the command log
                 Simulator.Log.LoadLog(Path.ChangeExtension(saveFile, "replay"));
 
-                Game.ReplaceState(new GameStateViewer3D(Viewer));
+                Game.ReplaceState(new GameStateViewer3D(Viewer, StartPaused));
             }
         }
 
@@ -597,7 +603,7 @@ namespace Orts.Viewer3D.Processes
             Simulator.Log.CommandList.Clear();
             CommandLog.ReportReplayCommands(Simulator.ReplayCommandList);
 
-            Game.ReplaceState(new GameStateViewer3D(Viewer));
+            Game.ReplaceState(new GameStateViewer3D(Viewer, StartPaused));
         }
 
         /// <summary>
@@ -676,7 +682,7 @@ namespace Orts.Viewer3D.Processes
             Simulator.ReplayCommandList = replayCommandList;
             CommandLog.ReportReplayCommands(Simulator.ReplayCommandList);
 
-            Game.ReplaceState(new GameStateViewer3D(Viewer));
+            Game.ReplaceState(new GameStateViewer3D(Viewer, StartPaused));
         }
 
         static string[] GetValidSaveVersionAndBuild(UserSettings settings, string saveFile, BinaryReader inf)
@@ -783,11 +789,11 @@ namespace Orts.Viewer3D.Processes
                 string fileName;
                 try
                 {
-                    fileName = string.Format(settings.LoggingFilename, Application.ProductName, VersionInfo.VersionOrBuild, VersionInfo.Version, VersionInfo.Build, DateTime.Now);
+                    fileName = string.Format("OpenRailsLog-{0}-{1}-{2]-{3}-{4}-{5}", Application.ProductName, VersionInfo.VersionOrBuild, VersionInfo.Version, VersionInfo.Build, DateTime.Now);
                 }
                 catch (FormatException)
                 {
-                    fileName = settings.LoggingFilename;
+                    fileName = string.Format("{0}-{1}.txt", settings.LoggingFilename, Process.GetCurrentProcess().Id);
                 }
                 logFileName = GetFilePath(settings, fileName);
 
@@ -795,6 +801,7 @@ namespace Orts.Viewer3D.Processes
                 if (!appendLog)
                     File.Delete(logFileName);
                 // Make Console.Out go to the log file AND the output stream.
+                Console.WriteLine("Log file " + logFileName);
                 Console.SetOut(new FileTeeLogger(logFileName, Console.Out));
                 // Make Console.Error go to the new Console.Out.
                 Console.SetError(Console.Out);
@@ -1021,11 +1028,15 @@ namespace Orts.Viewer3D.Processes
         {
             if (String.IsNullOrEmpty(acttype))
             {
+                Console.WriteLine("Args in INIT: ");
+                Console.WriteLine("[{0}]", string.Join(", ", args));
                 // old style processing without explicit action definition - to be removed later
                 if (args.Length == 1)
                     acttype = "activity";
                 else if (args.Length == 5)
                     acttype = "explorer";
+                else if (args.Length == 6 || args.Length == 7 || args.Length == 8)
+                    acttype = "syncsimulation";
             }
 
             Console.WriteLine(mode.Length <= 0 ? "Mode       = {1}" : acttype.Length > 0 ? "Mode       = {0}" : "Mode       = {0} {1}", mode, acttype);
@@ -1046,7 +1057,18 @@ namespace Orts.Viewer3D.Processes
                     Console.WriteLine("Consist    = {0} ({1})", GetConsistName(args[1]), args[1]);
                     Console.WriteLine("Time       = {0} ({1})", GetTime(args[2]), args[2]);
                     Console.WriteLine("Season     = {0} ({1})", GetSeason(args[3]), args[3]);
+                    Console.WriteLine("Weather    = {0} ({1})", GetWeather(args[4]), args[4]);  
+                    break;
+
+                case "syncsimulation":
+                    if (args.Length < 6) throw new InvalidCommandLine("Mode 'syncsimulation' needs 7 arguments: path file, consist file, time (hh[:mm[:ss]]), season (0-3), weather (0-2), step size (milliseconds), port.");
+                    Console.WriteLine("Route      = {0}", GetRouteName(args[0]));
+                    Console.WriteLine("Path       = {0} ({1})", GetPathName(args[0]), args[0]);
+                    Console.WriteLine("Consist    = {0} ({1})", GetConsistName(args[1]), args[1]);
+                    Console.WriteLine("Time       = {0} ({1})", GetTime(args[2]), args[2]);
+                    Console.WriteLine("Season     = {0} ({1})", GetSeason(args[3]), args[3]);
                     Console.WriteLine("Weather    = {0} ({1})", GetWeather(args[4]), args[4]);
+                    Console.WriteLine("Timestep (ms)    = {0}", int.Parse(args[5]));
                     break;
 
                 case "timetable":
@@ -1077,7 +1099,6 @@ namespace Orts.Viewer3D.Processes
             }
 
             Arguments = args;
-
             switch (acttype)
             {
                 case "activity":
@@ -1088,10 +1109,44 @@ namespace Orts.Viewer3D.Processes
                     break;
 
                 case "explorer":
+                    Console.Write("printing args here [");
+                    foreach (string str in args)
+                    {
+                        Console.Write(str);
+                        Console.Write(", ");
+                    }
+                    Console.Write("}");
+                    Console.WriteLine();
                     Simulator = new Simulator(settings, args[0], false);
                     if (LoadingScreen == null)
                         LoadingScreen = new LoadingScreenPrimitive(Game);
                     Simulator.SetExplore(args[0], args[1], args[2], args[3], args[4]);
+                    break;
+
+                case "syncsimulation":
+                    Console.Write("printing args here [");
+                    foreach (string str in args)
+                    {
+                        Console.Write(str);
+                        Console.Write(", ");
+                    }
+                    Console.Write("}");
+                    Console.WriteLine();
+                    Simulator = new Simulator(settings, args[0], false, true);
+
+                    SyncSimulation.isSyncSimulation = true;
+                    SyncSimulation.pauseAtGameStart = false;
+                    SyncSimulation.simStepSeconds = TimeSpan.FromMilliseconds(int.Parse(args[5]));
+
+                    if (args.Length > 7)
+                    {
+                        SensorConfig = args[7];
+                    }
+
+                    if (LoadingScreen == null)
+                        LoadingScreen = new LoadingScreenPrimitive(Game);
+                    Simulator.SetSyncSimulation(args[0], args[1], args[2], args[3], args[4], args[6]);
+                    
                     break;
 
                 case "exploreactivity":

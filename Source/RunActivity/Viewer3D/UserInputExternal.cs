@@ -1,4 +1,4 @@
-// COPYRIGHT 2022 by the Open Rails project.
+﻿// COPYRIGHT 2022 by the Open Rails project.
 // 
 // This file is part of Open Rails.
 // 
@@ -17,6 +17,7 @@
 
 using System;
 using System.Collections.Generic;
+using Microsoft.Xna.Framework;
 using Orts.Formats.Msts;
 using Orts.Simulation.RollingStocks;
 using ORTS.Common;
@@ -29,12 +30,13 @@ namespace Orts.Viewer3D
     /// </summary>
     public class ExternalDeviceState
     {
-        public Dictionary<(CabViewControlType,int), ExternalDeviceCabControl> CabControls;
+        public Dictionary<(CabViewControlType,int, string), ExternalDeviceCabControl> CabControls;
         public Dictionary<UserCommand, ExternalDeviceButton> Commands;
+        public List<WorldCommand> WorldCommands;
         public ExternalDeviceState()
         {
             Commands = new Dictionary<UserCommand, ExternalDeviceButton>();
-            CabControls = new Dictionary<(CabViewControlType,int), ExternalDeviceCabControl>();
+            CabControls = new Dictionary<(CabViewControlType,int, string), ExternalDeviceCabControl>();
         }
 
         public virtual void Handled()
@@ -104,6 +106,48 @@ namespace Orts.Viewer3D
                     Changed = true;
                 }
             }
+        }
+        public MSTSLocomotive Locomotive { get; set; }
+    }
+
+    public abstract class WorldCommand
+    {
+        public readonly int TileX;
+        public readonly int TileZ;
+        public uint ObjectId;
+
+
+
+        public static Dictionary<string, Func<IDictionary<string, object>, WorldCommand>> Constructors =
+            new Dictionary<string, Func<IDictionary<string, object>, WorldCommand>>
+        {
+            {"ChangeObjectPosition", p => new ChangeObjectPositionCommand(p)}
+        };  
+
+        public WorldCommand(IDictionary<string, object> parameters)
+        {
+            TileX = Convert.ToInt32(parameters["TileX"]);
+            TileZ = Convert.ToInt32(parameters["TileZ"]);
+            ObjectId = Convert.ToUInt32(parameters["UID"]);
+
+        }
+
+}
+    public class ChangeObjectPositionCommand : WorldCommand
+    {
+        public WorldPosition Position;
+
+        public ChangeObjectPositionCommand(IDictionary<string, object> parameters) : base(parameters)
+        {
+            float x = Convert.ToSingle(parameters["x"]);
+            float y = Convert.ToSingle(parameters["y"]);
+            float z = Convert.ToSingle(parameters["z"]);
+            float yaw = Convert.ToSingle(parameters["yaw"]);
+            float pitch = Convert.ToSingle(parameters["pitch"]);
+            float roll = Convert.ToSingle(parameters["roll"]);
+
+            Position = new WorldPosition(TileX, TileZ, new Vector3(x, y, -z), 
+                Quaternion.CreateFromYawPitchRoll(yaw, pitch, roll));
         }
     }
 }

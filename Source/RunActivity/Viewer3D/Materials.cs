@@ -237,14 +237,33 @@ namespace Orts.Viewer3D
         public readonly ParticleEmitterShader ParticleEmitterShader;
         public readonly PopupWindowShader PopupWindowShader;
         public readonly PrecipitationShader PrecipitationShader;
-        public readonly SceneryShader SceneryShader;
+        readonly SceneryShader _SceneryShader;
         public readonly ShadowMapShader ShadowMapShader;
         public readonly SkyShader SkyShader;
         public readonly DebugShader DebugShader;
+        readonly DepthSensorShader _DepthSensorShader;
 
         public static Texture2D MissingTexture;
         public static Texture2D DefaultSnowTexture;
         public static Texture2D DefaultDMSnowTexture;
+
+        public bool DepthSensorActive { get { return CameraSensor.CurrentSensor != null && CameraSensor.CurrentSensor is DepthSensor; } }
+
+        public AbstractSceneryShader SceneryShader
+        {
+            get
+            {
+                if (DepthSensorActive)
+                {
+                    return _DepthSensorShader;
+                }
+                else
+                {
+                    return _SceneryShader;
+                }
+            }
+        }
+
 
         [CallOnThread("Render")]
         public SharedMaterialManager(Viewer viewer)
@@ -256,13 +275,14 @@ namespace Orts.Viewer3D
             ParticleEmitterShader = new ParticleEmitterShader(viewer.RenderProcess.GraphicsDevice);
             PopupWindowShader = new PopupWindowShader(viewer, viewer.RenderProcess.GraphicsDevice);
             PrecipitationShader = new PrecipitationShader(viewer.RenderProcess.GraphicsDevice);
-            SceneryShader = new SceneryShader(viewer.RenderProcess.GraphicsDevice);
+            _SceneryShader = new SceneryShader(viewer.RenderProcess.GraphicsDevice);
+            _DepthSensorShader = new DepthSensorShader(viewer.RenderProcess.GraphicsDevice);
             var microtexPath = viewer.Simulator.RoutePath + @"\TERRTEX\microtex.ace";
             if (File.Exists(microtexPath))
             {
                 try
                 {
-                    SceneryShader.OverlayTexture = Orts.Formats.Msts.AceFile.Texture2DFromFile(viewer.GraphicsDevice, microtexPath);
+                    _SceneryShader.OverlayTexture = Orts.Formats.Msts.AceFile.Texture2DFromFile(viewer.GraphicsDevice, microtexPath);
                 }
                 catch (InvalidDataException error)
                 {
@@ -476,7 +496,7 @@ namespace Orts.Viewer3D
             else
                 sunDirection = Viewer.World.MSTSSky.mstsskysolarDirection;
 
-            SceneryShader.SetLightVector_ZFar(sunDirection, Viewer.Settings.ViewingDistance);
+            _SceneryShader.SetLightVector_ZFar(sunDirection, Viewer.Settings.ViewingDistance);
             
             // Headlight illumination
             if (Viewer.PlayerLocomotiveViewer != null
@@ -505,7 +525,7 @@ namespace Orts.Viewer3D
                 }
                 if (!lightState && fadeDuration == 0)
                     // This occurs when switching locos and needs to be handled or we get lingering light.
-                    SceneryShader.SetHeadlightOff();
+                    _SceneryShader.SetHeadlightOff();
                 else
                 {
                     if (sunDirection.Y <= -0.05)
@@ -524,27 +544,29 @@ namespace Orts.Viewer3D
                         clampValue = 1 - 2.5f * (sunDirection.Y + 0.05f); // in the meantime interpolate
                         distance = lightDrawer.LightConeDistance*(1-4.5f*(sunDirection.Y + 0.05f)); //ditto
                     }
-                    SceneryShader.SetHeadlight(ref lightDrawer.LightConePosition, ref lightDrawer.LightConeDirection, distance, lightDrawer.LightConeMinDotProduct, (float)(Viewer.Simulator.GameTime - fadeStartTimer), fadeDuration, clampValue, ref lightDrawer.LightConeColor);
+                    _SceneryShader.SetHeadlight(ref lightDrawer.LightConePosition, ref lightDrawer.LightConeDirection, distance, lightDrawer.LightConeMinDotProduct, (float)(Viewer.Simulator.GameTime - fadeStartTimer), fadeDuration, clampValue, ref lightDrawer.LightConeColor);
                 }
             }
             else
             {
-                SceneryShader.SetHeadlightOff();
+                _SceneryShader.SetHeadlightOff();
             }
             // End headlight illumination
             if (Viewer.Settings.UseMSTSEnv == false)
             {
-                SceneryShader.Overcast = Viewer.Simulator.Weather.OvercastFactor;
-                SceneryShader.SetFog(Viewer.Simulator.Weather.FogDistance, ref SharedMaterialManager.FogColor);
+                _SceneryShader.Overcast = Viewer.Simulator.Weather.OvercastFactor;
+                _SceneryShader.SetFog(Viewer.Simulator.Weather.FogDistance, ref SharedMaterialManager.FogColor);
                 ParticleEmitterShader.SetFog(Viewer.Simulator.Weather.FogDistance, ref SharedMaterialManager.FogColor);
-                SceneryShader.ViewerPos = Viewer.Camera.XnaLocation(Viewer.Camera.CameraWorldLocation);
+                _SceneryShader.ViewerPos = Viewer.Camera.XnaLocation(Viewer.Camera.CameraWorldLocation);
+                _DepthSensorShader.ViewerPos = Viewer.Camera.XnaLocation(Viewer.Camera.CameraWorldLocation);
             }
             else
             {
-                SceneryShader.Overcast = Viewer.World.MSTSSky.mstsskyovercastFactor;
-                SceneryShader.SetFog(Viewer.World.MSTSSky.mstsskyfogDistance, ref SharedMaterialManager.FogColor);
+                _SceneryShader.Overcast = Viewer.World.MSTSSky.mstsskyovercastFactor;
+                _SceneryShader.SetFog(Viewer.World.MSTSSky.mstsskyfogDistance, ref SharedMaterialManager.FogColor);
                 ParticleEmitterShader.SetFog(Viewer.Simulator.Weather.FogDistance, ref SharedMaterialManager.FogColor);
-                SceneryShader.ViewerPos = Viewer.Camera.XnaLocation(Viewer.Camera.CameraWorldLocation);
+                _SceneryShader.ViewerPos = Viewer.Camera.XnaLocation(Viewer.Camera.CameraWorldLocation);
+                _DepthSensorShader.ViewerPos = Viewer.Camera.XnaLocation(Viewer.Camera.CameraWorldLocation);
             }
         }
     }
@@ -553,6 +575,8 @@ namespace Orts.Viewer3D
     {
         public readonly Viewer Viewer;
         readonly string Key;
+
+        
 
         protected Material(Viewer viewer, string key)
         {
@@ -708,6 +732,8 @@ namespace Orts.Viewer3D
         IEnumerator<EffectPass> ShaderPassesImage;
         IEnumerator<EffectPass> ShaderPassesVegetation;
         IEnumerator<EffectPass> ShaderPasses;
+        private AbstractSceneryShader LastShader = null;
+        
         public static readonly DepthStencilState DepthReadCompareLess = new DepthStencilState {
             DepthBufferWriteEnable = false,
             DepthBufferFunction = CompareFunction.Less,
@@ -791,15 +817,15 @@ namespace Orts.Viewer3D
             graphicsDevice.RasterizerState = RasterizerState.CullCounterClockwise;
 
             var shader = Viewer.MaterialManager.SceneryShader;
+            var shaderChanged = shader != LastShader;
             var level9_3 = Viewer.Settings.IsDirectXFeatureLevelIncluded(ORTS.Settings.UserSettings.DirectXFeature.Level9_3);
-            if (ShaderPassesDarkShade == null) ShaderPassesDarkShade = shader.Techniques[level9_3 ? "DarkShadeLevel9_3" : "DarkShadeLevel9_1"].Passes.GetEnumerator();
-            if (ShaderPassesFullBright == null) ShaderPassesFullBright = shader.Techniques[level9_3 ? "FullBrightLevel9_3" : "FullBrightLevel9_1"].Passes.GetEnumerator();
-            if (ShaderPassesHalfBright == null) ShaderPassesHalfBright = shader.Techniques[level9_3 ? "HalfBrightLevel9_3" : "HalfBrightLevel9_1"].Passes.GetEnumerator();
-            if (ShaderPassesImage == null) ShaderPassesImage = shader.Techniques[level9_3 ? "ImageLevel9_3" : "ImageLevel9_1"].Passes.GetEnumerator();
-            if (ShaderPassesVegetation == null) ShaderPassesVegetation = shader.Techniques[level9_3 ? "VegetationLevel9_3" : "VegetationLevel9_1"].Passes.GetEnumerator();
-
-            shader.LightingDiffuse = (Options & SceneryMaterialOptions.Diffuse) != 0 ? 1 : 0;
-
+            if (ShaderPassesDarkShade == null || shaderChanged) ShaderPassesDarkShade = shader.Techniques[level9_3 ? "DarkShadeLevel9_3" : "DarkShadeLevel9_1"].Passes.GetEnumerator();
+            if (ShaderPassesFullBright == null || shaderChanged) ShaderPassesFullBright = shader.Techniques[level9_3 ? "FullBrightLevel9_3" : "FullBrightLevel9_1"].Passes.GetEnumerator();
+            if (ShaderPassesHalfBright == null || shaderChanged) ShaderPassesHalfBright = shader.Techniques[level9_3 ? "HalfBrightLevel9_3" : "HalfBrightLevel9_1"].Passes.GetEnumerator();
+            if (ShaderPassesImage == null || shaderChanged) ShaderPassesImage = shader.Techniques[level9_3 ? "ImageLevel9_3" : "ImageLevel9_1"].Passes.GetEnumerator();
+            if (ShaderPassesVegetation == null || shaderChanged) ShaderPassesVegetation = shader.Techniques[level9_3 ? "VegetationLevel9_3" : "VegetationLevel9_1"].Passes.GetEnumerator();
+            LastShader = shader;
+            
             // Set up for alpha blending and alpha test 
 
             if (GetBlending())
@@ -912,6 +938,9 @@ namespace Orts.Viewer3D
                 {
                     shader.SetMatrix(item.XNAMatrix, ref XNAViewMatrix, ref XNAProjectionMatrix);
                     shader.ZBias = item.RenderPrimitive.ZBias;
+
+                    DepthSensor.ConfigureShader(shader, item, Options);
+                    
                     ShaderPasses.Current.Apply();
 
                     // SamplerStates can only be set after the ShaderPasses.Current.Apply().

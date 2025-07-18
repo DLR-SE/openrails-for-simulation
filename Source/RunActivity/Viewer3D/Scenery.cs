@@ -53,6 +53,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Security.Cryptography;
+using Swan;
 
 namespace Orts.Viewer3D
 {
@@ -151,6 +153,14 @@ namespace Orts.Viewer3D
             }
         }
 
+        public void HandleUserInput()
+        {
+            foreach (var worldFile in WorldFiles)
+            {
+                worldFile.HandleUserInput();
+            }
+        }
+
         [CallOnThread("Loader")]
         internal void Mark()
         {
@@ -245,6 +255,7 @@ namespace Orts.Viewer3D
         public List<TrItemLabel> platforms = new List<TrItemLabel>();
         public List<PickupObj> PickupList = new List<PickupObj>();
         public List<BoundingBox> BoundingBoxes = new List<BoundingBox>();
+        public Dictionary<uint, (StaticShape, BoundingBox)> Index2Shape = new Dictionary<uint, (StaticShape, BoundingBox)>();
 
         readonly Viewer Viewer;
 
@@ -340,7 +351,7 @@ namespace Orts.Viewer3D
                         shapeFilePath = null;
                     }
                 }
-
+                bool hasBoundingBox = false;
                 if (shapeFilePath != null && File.Exists(shapeFilePath + "d"))
                 {
                     var shape = new ShapeDescriptorFile(shapeFilePath + "d");
@@ -354,6 +365,7 @@ namespace Orts.Viewer3D
                         //transform.M42 += (max.Y + min.Y) / 2;
                         //transform.M43 += (max.Z + min.Z) / 2;
                         BoundingBoxes.Add(new BoundingBox(transform, new Vector3((max.X - min.X) / 2, (max.Y - min.Y) / 2, (max.Z - min.Z) / 2), worldMatrix.XNAMatrix.Translation.Y));
+                        hasBoundingBox = true;
                     }
                 }
 
@@ -484,18 +496,30 @@ namespace Orts.Viewer3D
                         var animNodes = preTestShape.SharedShape.Animations?.FirstOrDefault()?.anim_nodes ?? new List<anim_node>();
 
                         var isAnimatedClock = animNodes.Exists(node => Regex.IsMatch(node.Name, @"^orts_[hmsc]hand_clock", RegexOptions.IgnoreCase));
+                        StaticShape sceneryObject;
                         if (isAnimatedClock)
                         {
-                            sceneryObjects.Add(new AnalogClockShape(viewer, shapeFilePath, worldMatrix, shadowCaster ? ShapeFlags.ShadowCaster : ShapeFlags.None));
+                            sceneryObject = new AnalogClockShape(viewer, shapeFilePath, worldMatrix, shadowCaster ? ShapeFlags.ShadowCaster : ShapeFlags.None);
                         }
                         else if (animated)
                         {
-                            sceneryObjects.Add(new AnimatedShape(viewer, shapeFilePath, worldMatrix, shadowCaster ? ShapeFlags.ShadowCaster : ShapeFlags.None));
+                            sceneryObject = new AnimatedShape(viewer, shapeFilePath, worldMatrix, shadowCaster ? ShapeFlags.ShadowCaster : ShapeFlags.None);
                         }
                         else
                         {
-                            sceneryObjects.Add(new StaticShape(viewer, shapeFilePath, worldMatrix, shadowCaster ? ShapeFlags.ShadowCaster : ShapeFlags.None));
+                            sceneryObject = new StaticShape(viewer, shapeFilePath, worldMatrix, shadowCaster ? ShapeFlags.ShadowCaster : ShapeFlags.None);
                         }
+                        var classification = (worldObject.StaticFlags >> 24) & 7;
+                        if ((worldObject.StaticFlags & (uint) StaticFlag.Terrain) != 0 && classification == 0)
+                        {
+                            sceneryObject.Classification = ObjectClass.Terrain;
+                        }
+                        else
+                        {
+                            sceneryObject.Classification = (ObjectClass)classification;
+                        }
+                        sceneryObjects.Add(sceneryObject);
+                        Index2Shape.Add(worldObject.UID, (sceneryObjects.Last(), hasBoundingBox ? BoundingBoxes.Last() : new BoundingBox()));
                     }
                     else if (worldObject.GetType() == typeof(PickupObj))
                     {
@@ -635,11 +659,43 @@ namespace Orts.Viewer3D
                 spawner.Update(elapsedTime);
         }
 
+        public void HandleUserInput()
+        {
+            // Trace.WriteLine(String.Format("Avaliable shapes are {0}", Index2Shape.Keys.Stringify()));
+            foreach (var command in UserInput.WebDeviceState.WorldCommands)
+            {
+                
+                if (command.TileX != TileX || command.TileZ != TileZ)
+                {
+                    continue;
+                }
+                if (command is ChangeObjectPositionCommand)
+                {
+                    var OID = ((ChangeObjectPositionCommand)command).ObjectId;
+                    if (!Index2Shape.ContainsKey(OID))
+                    {
+                        Trace.WriteLine(String.Format("Shape with index {0} not found", OID));
+                        continue;
+                    }
+                    
+                    var newPosition = ((ChangeObjectPositionCommand)command).Position;
+                    var shape = Index2Shape[OID].Item1;
+                    var bbox = Index2Shape[OID].Item2;
+                    shape.Location = newPosition;
+                    Trace.WriteLine(String.Format("Shape with index {0} modified. New position: {1}", OID, shape.Location));
+                    bbox.Transform = Matrix.Invert(newPosition.XNAMatrix);
+                }
+            }
+        }
+
         [CallOnThread("Updater")]
         public void PrepareFrame(RenderFrame frame, ElapsedTime elapsedTime)
         {
             foreach (var shape in sceneryObjects)
+            {
+                frame.NextObject(shape.Classification);
                 shape.PrepareFrame(frame, elapsedTime);
+            }
             foreach (var dTrack in dTrackList)
                 dTrack.PrepareFrame(frame, elapsedTime);
             foreach (var forest in forestList)
@@ -728,7 +784,7 @@ namespace Orts.Viewer3D
 
     public struct BoundingBox
     {
-        public readonly Matrix Transform;
+        public Matrix Transform;
         public readonly Vector3 Size;
         public readonly float Height;
 

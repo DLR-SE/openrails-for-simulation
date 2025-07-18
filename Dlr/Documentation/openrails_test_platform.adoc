@@ -1,0 +1,374 @@
+= OpenRails Test Platform
+:toc: left
+
+Using this library, OpenRails can be used as a test platform to test autonomous train driving functions with different scenarios in a synchronous simulation environment.
+This document explains the basic architecture of the simulation setup and how to develop test scenarios.
+
+== Basic Architecture
+
+The flow of information between a python simulation client and the OpenRails server is depicted in the following diagram:
+
+image::images/DLR-SE-Railway-Simulator.svg[]
+
+The testcases and the sensor layer are freely configurable using the python interface. 
+How this can be achieved is shown in the next section.
+
+== Usage
+
+Building and executing a testcase consists of the following steps:
+
+=== 1. Set up your development environment
+
+For convenience, the library tries to find the path to the directory holding the 
+OpenRails executables in the environment variable `OR_EXEC_DIR`. 
+It is recommended to set this environment variable (restart required afterward).
+
+You may also provide a base path for the directory holding the content files 
+used for defining scenarios. 
+The recommended variable name is `OR_CONTENT_BASE`.
+
+Names for environment variables together wit example values are defined in `constants.py`.
+
+=== 2. Define the Simulation Environment
+
+There are two ways of setting up the simulation environment.
+You can define it manually, or import a scenario from Traffic Sequence Charts.
+Both variants are explained here.
+
+==== 2.1 Manual Definition
+
+===== 2.1.1 Using an existing route
+
+[source,python]
+----
+from openrails.environment import Environment, Season, Weather
+
+basepath = os.getenv(OR_CONTENT_BASE)
+
+basepath = os.getenv(OR_CONTENT_BASE)
+route = os.path.join(basepath, r"Demo Model 1\ROUTES\Oldenburg")
+environment = Environment(route, datetime.time(hour=13, minute=0), Season.SPRING, Weather.CLEAR)
+----
+
+NOTE: The `Oldenburg` track is not included in this release. 
+
+The environment consists of the world that the simulation will run as well as the time, season and weather.
+
+===== 2.1.2 Creating the route yourself
+
+The creation of the route is described in xref:routecreation.adoc[Route Creation].
+After the created route has been written to disc, everything is the same as in the section above.
+
+
+=== 3. Create a server with the Environment
+
+[source,python]
+----
+from openrails.open_rails_server import OpenRailsServer
+
+server = OpenRailsServer(environment)
+----
+
+This does not yet start the simulation, but only sets the configuration options.
+The server object is needed for the following steps, so it is best to create it now.
+
+In addition to the environment, the parameters `openrails_dir`, `openrails_exe`, `host`, `port`
+and `api_path` are available as optional parameters to configure the server connection. 
+The standard values or environment variables defined in the constructor of `OpenRailsServer` should work in most cases when running server and client on the same PC without changing the default configurations of OpenRails.
+
+=== 4. Create Trains
+
+[source,python]
+----
+from model.train import Train
+
+consist = os.path.join(basepath, r"Demo Model 1\TRAINS\CONSISTS\MT_MT_Class 27 102 & 6 mk2 PP.CON")
+
+ego_train = Train(server, consist=consist, path_number=10, is_ego=True)
+other_train = Train(server, name="OTHER_TRAIN", consist=consist, path_number=9)
+----
+
+Each Testcase needs exactly one ego train, which will be the system under test.
+It is marked by the `is_ego` flag in the constructur.
+The ego train gets assigned the name `PLAYER` automatically.
+All other trains need to be assigned a name in the constructor.
+When constructed, the train registers itself with the server object.
+The path to the train model (`consist`) can be different for each train.
+The path number needs to be the number of a path that exists within the world defined in the environment.
+
+=== 5. Define Sensors
+
+In the OpenRails testing environment, there exist two categories of sensors:
+Train-based sensors that are sensors attached to a specific train, and trackside sensors that are placed along the track.
+Both sensors can be defined in a similar way.
+For train-based sensors, the definition is as follows:
+
+[source,python]
+----
+my_train_sensor = MyCustomSensor(server)
+ego_train.add_sensor("sensor_name", my_train_sensor)
+----
+
+When a sensor is attached to a train like this, it will be updated after each step.
+
+If you want to get the current sensor output data, you can get that from the sensor object directly:
+
+[source,python]
+----
+my_train_sensor.output()
+# if you need to get the sensor object via the train you can use the sensor name from the `add_sensor` call:
+sensor_output = ego_train.sensors["sensor_name"].output()
+----
+
+Trackside sensors work similar, but are attached directly to the server:
+
+[source,python]
+----
+my_track_sensor = MyCustomSensor(server)
+server.add_sensor("track_sensor_name", my_track_sensor)
+
+# after server.step():
+
+my_track_sensor.output()
+# if you need to get the sensor object via the server you can use the sensor name from the `add_sensor` call:
+sensor_output = server.sensors["sensor_name"].output()
+----
+
+It is also possible to attach a sensor to a `SceneryObject` placed in the world.
+This can be useful for trackside equipment that needs to know its position, or sensors that are on other moving objects except for trains.
+If you have an instance of a `SceneryObject` (see xref:routecreation.adoc[Route Creation] on how to create one), you can attach a sensor like this:
+
+[source,python]
+----
+my_train_sensor.set_world_object(my_world_object)
+----
+
+and get its position via
+
+[source,python]
+----
+position = my_train_sensor.world_object.pos
+----
+
+To build a custom sensor, subclass `Sensor` (found in `sensors.py`) and implement the `update(state)` and the `output()` method.
+The `update(state)` method must calculate the current sensor output from the full simulation state returned from the server.
+The `output()` method must return a dict that contains the current sensor values.
+
+Each sensor - whether trackside or train-based - is updated from the server after every simulation step.
+The order in which the sensors are called is undefined.
+Each sensor operates only on the original state and does not get information from other sensors.
+
+=== 6. Set switches 
+
+The switches in the simulation can be set via the `SwitchSetting` class.
+The default implementation enables selecting switches by indexing them along a train's path.
+An `SwitchSetting` object needs a dictionary mapping the train names to `Path` object.
+It registers itself with the server at construction:
+
+[source, python]
+----
+switch_setting = SwitchSetting(server, scenario.train_paths)
+----
+
+Setting a switch at any point during the can be done via the `set_switch` method.
+It requires the name of the train on whose path the n-th switch is set to the target state.
+
+[source, python]
+----
+switch_setting.set_switch("my_train_name", 0, SwitchState.LEFT)
+----
+
+CAUTION: `SwitchState.LEFT` and `SwitchState.RIGHT` are currently not globally aligned, i.e., their meaning depends on the rotation of the switch.
+This has not been fully tested yet.
+Their definition may need to be changed in order to create a fully automated schedule for the switch setting.
+
+
+=== 7. Conclude Server Setup
+[source, python]
+----
+server.setup()
+----
+
+After setting up the simulation components, the server must be explicitly started.
+This command launches the OpenRails instance and loads the components registered at this point.
+After this, adding new trains or changing the environment is no longer possible.
+
+
+=== 8. Controlling the Trains
+
+[source,python]
+----
+ego_train.set(direction=1.0, train_brake=1.0)
+other_train.set(direction=1.0, train_brake=0.0)
+----
+
+This sets values for the control input on the respective trains.
+
+
+=== 9. Running the Simulation(s)
+
+To enable cosimulation, this framework uses  https://simpy.readthedocs.io/en/latest/[SimPy].
+Each component that should be simulated is defined as a SimPy process which runs inside a shared SimPy environment.
+This includes:
+
+* The OpenRails server
+* The trains' controllers
+* The communication infrastructure within trains
+* Plotting and display processes
+* Any other processes that need to be run in parallel to the simulation
+
+Each of these components needs to implemend a method `run(simpy_env, step_size`) which contains a loop to conduct its task and yields a `simpy_env.timeout()` event afterward.
+This enables synchronizing the processes.
+Because synchronous co-simulation is needed, the timeout is the server step size for each process.
+The clock time of the shared environment is always the simulation time.
+
+An example of this is a simple controller function:
+
+[source,python]
+----
+# class MyController
+def run(self, simpy_env, step_size_ms):
+    self.ego_train.set(direction=1.0, train_brake=1.0)
+    self.other_train.set(direction=1.0, train_brake=0.0)
+    yield simpy_env.timeout(step_size_ms)
+----
+
+Then the co-simulation of the OpenRails server and the controller is triggered by this:
+
+[source,python]
+----
+simpy_env = simpy.Environment()
+
+simpy_env.process(server.run(simpy_env)) # the server step size is already set on construction
+simpy_env.process(controller.run(simpy_env, server.step_size_ms))
+simpy_env.run(until=MAX_TIME) # the end can be a pre-defined timestamp or a simpy process yielding a success event
+----
+
+By starting the simulation this way, the following happens: First, the server sets the ego train control inputs to the values set by the ego train controller, steps the simulation and collects the new state of the simulation.
+This state is used to update the state of all train and sensor objects, from which the current values can be obtained either via their fields or via the `Sensor.output()` method.
+
+Static scenery objects (that have been marked as animated) can be moved around by wrapping them into a `DynamicObject` from the `dynamic_objects` module.
+For changing an object state on the server, the object needs to be identified via its ID and world tile.
+Therefore, it is required that the route has been created with the `openrails.ORWriter` class from the `routecreation` package, in order to provide the required information.
+The functions controlling the dynamic objects should be modeled as simpy processes, same as the controllers for the trains.
+An example for this is given here:
+
+[source,python]
+----
+# create the route
+graph = Graph()
+start = Node(Pose(Vector(-1000.0, 0.0)), graph)
+end = start.add_edge(2000.0)
+edge = end.edge
+
+tree = SceneryObject(Pose(Vector(200.0, -4.0), 0.0), relative_to=edge, shapefile='tree.s', animated=True)
+
+# create the route folder for OpenRails
+route = os.path.join(basepath, r"Demo Model 1\ROUTES\Straight")
+
+writer = ORWriter(route, graph)
+writer.write_all()
+
+# start the server
+environment = Environment(route, ...)
+server = OpenRailsServer(environment)
+simpy_env = simpy.Environment()
+...  # declaration of trains omitted
+
+# wrap the tree into a dynamic object
+dynamic_tree = DynamicObject(server, tree)
+
+class TreeController:
+    def __init__(self, tree):
+        self.i = 0
+        self.tree = tree
+
+    def run(self, simpy_env, step_size_ms):
+        # we let the train "fall" down by changing its roll angle
+        self.tree.roll = math.sin(i)
+        self.i += 0.1
+        yield simpy_env.timeout(step_size_ms)
+
+tree_controller = TreeController(dynamic_tree)
+
+simpy_env.process(server.run(simpy_env)) # the server step size is already set on construction
+simpy_env.process(controller.run(simpy_env, server.step_size_ms))
+simpy_env.process(tree_controller.run(simpy_env, server.step_size_ms))
+simpy_env.run(until=MAX_TIME)
+----
+
+
+
+== Demo
+
+Three demos showcasing different parts of the simulation API can be found in the `demos` folder. 
+
+* `demo_basic.py`: create a very simple route and drive a train on it
+* `demo_switch_setting.py`: setting switches
+* `demo_tree`: simulate a falling tree by changing object positions during simulation
+
+== Observations and Known Issues
+
+Here, observations that were made during development are documented as well as known issues for which no 
+plan on how to fix it exists:
+
+* With the Scottish Capital Express scenario, OpenRails seems to run into race condition when the train reaches a certain location and using the remote controls for the train
+* The Train Brake has a documented range of 0 to 1 and can be set to 1 in the UI, but caps off at 0.75 when set through http
+* The Simulation currently only supports step sizes up to 500ms.
+
+
+== Server API
+
+The WebServer provided by OpenRails to receive commands and send output has been modified to support  sending a command and receiving a set of information on the current simulation state in return. 
+In order to give commands to the train, clients can send a message similar to the following to the OpenRails Server (usually on `localhost:2150`):
+
+[source,json]
+----
+{
+  "Controls": [
+    {
+      "TypeName": "THROTTLE",
+      "ControlIndex": 1,
+      "Value": 0.5
+    }
+  ],
+  "Commands": [
+    {
+      "Command": "ChangeObjectPosition",
+      "UID": 2,
+      "TileX": -5354,
+      "TileZ": 14849,
+      ...
+    }
+  ], 
+  "SwitchCommands": {
+    "0": 0,
+    "1": 1,
+  }
+}
+----
+
+The message consists of two lists of objects containing an arbitrary number of commands, and an object that contains new switch states
+
+* `Controls` contains train control commands.
+The `TypeName` in each command corresponds to the names specified in `CABViewControlTypes` and must be uppercase.
+The `ControlIndex` is the index of the control type, in most cases this is optional.
+`Value` holds the value that the respective control should be set to, this is a floating point value.
+* `Commands` contains commands that influence the train environment. The `Command` field identifies the type of command. The only one currently implemented is `ChangeObjectPosition` that moves a static object. The remaining attributes are command dependent. For commands that modify world file objects (i.e., static objects), the modified object is identified via its ìndex (`UID`) in the world file, as well as the world tile (`TileX`, `TileY`) it belongs to.
+* `SwitchCommands` contains changed switch states. The keys in this object are the internal IDs used by OpenRails to identify switches, and the values indicate the new switch settings.  
+
+== Synchronous Simulation
+
+In order to be usable in testing, the simulation was made synchronous, i.e., the simulation occurs only in this sequence:
+
+1. Wait for input from all clients
+2. Perform a simulation step with a fixed time step
+3. Output the current state of the simulation
+
+This was achieved by using a semaphore representing each step to force the different threads in OpenRails to act in this order. 
+The configuration for toggling the synchronous simulation, setting the time step and other variables is located 
+in `Viewer3D/Processes/SyncSimulation.cs`. This file also defines the semaphores. Additionally, the OpenRails simulation was made deterministic by switching on its ability to use a fixed seed for 
+its random calculations. 
+
+
+

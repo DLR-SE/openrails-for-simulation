@@ -29,11 +29,14 @@ using Newtonsoft.Json.Serialization;
 using Orts.Common;
 using Orts.Formats.Msts;
 using Orts.Simulation.Physics;
+using Orts.Simulation.RollingStocks;
+using Orts.Viewer3D.Processes;
 using Orts.Viewer3D.RollingStock;
 using ORTS.Common;
 using ORTS.Settings;
 using System;
 using System.Collections.Generic;
+using System.Drawing.Printing;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -64,9 +67,16 @@ namespace Orts.Viewer3D.WebServices
         /// <returns>The EmbedIO web server instance.</returns>
         public static EmbedIO.WebServer CreateWebServer(IEnumerable<string> urls, string path)
         {
-            // Viewer is not yet initialized in the GameState object - wait until it is
-            while (Program.Viewer == null)
-                Thread.Sleep(1000);
+            // Viewer is not yet initialized in the GameState object - wait until it is 
+            // When in synchronized mode, do not wait because the Viewer will be ready when needed
+            if (!SyncSimulation.isSyncSimulation)
+            {
+                while (Program.Viewer == null)
+                {
+                    System.Diagnostics.Debug.WriteLine("waiting for viewer");
+                    Thread.Sleep(1000);
+                }
+            }
 
             return new EmbedIO.WebServer(o => o
                     .WithUrlPrefixes(urls))
@@ -81,14 +91,24 @@ namespace Orts.Viewer3D.WebServices
         /// </remarks>
         private static async Task SerializationCallback(IHttpContext context, object data)
         {
-            using (var text = context.OpenResponseText(new UTF8Encoding()))
+            if (data is byte[])
             {
+                using (var stream = context.OpenResponseStream(true, false))
+                {
+                    await stream.WriteAsync((byte[])data, 0, ((byte[])data).Length); // ((byte[])data).Length);
+                }
+            }
+            else
+            {
+                using (var text = context.OpenResponseText(new UTF8Encoding(false)))
+                {
                 await text.WriteAsync(JsonConvert.SerializeObject(data, new JsonSerializerSettings()
                 {
                     Formatting = Formatting.Indented,
                     ContractResolver = new XnaFriendlyResolver()
                 }));
             }
+        }
         }
         
         public static async Task<T> DeserializationCallback<T>(IHttpContext context)
@@ -126,11 +146,34 @@ namespace Orts.Viewer3D.WebServices
         /// </summary>
         private readonly Viewer Viewer;
         protected WorldLocation cameraLocation = new WorldLocation();
+        private OutputGenerator OutputGenerator;
+        private SwitchController SwitchController;
 
         public ORTSApiController(Viewer viewer)
         {
             Viewer = viewer;
+            OutputGenerator = new OutputGenerator(Viewer);
+            SwitchController = new SwitchController(Viewer.Simulator);
         }
+
+        #region /API/READY
+        [Route(HttpVerbs.Get, "/READY")]
+        public void ReadyEndpoint()
+        {
+            System.Diagnostics.Debug.WriteLine("ready endpoint: " + (Program.Viewer != null));
+            if (Program.Viewer != null)
+            {
+                HttpContext.Response.StatusCode = 200;
+            }
+            else
+            {
+                HttpContext.Response.StatusCode = 425;
+            }
+            
+            HttpContext.SendDataAsync("");
+
+        }
+        #endregion
 
         #region /API/APISAMPLE
         public struct Embedded
@@ -273,22 +316,92 @@ namespace Orts.Viewer3D.WebServices
         // ]
 
         [Route(HttpVerbs.Post, "/CABCONTROLS")]
-        public async Task SetCabControls()
+        public async Task<Dictionary<string, object>> SetCabControls()
         {
-            var data = await HttpContext.GetRequestDataAsync<IEnumerable<ControlValuePost>>(WebServer.DeserializationCallback<IEnumerable<ControlValuePost>>);
-            var dev = UserInput.WebDeviceState;
-            foreach (var control in data)
+            if (SyncSimulation.isSyncSimulation)
             {
-                var key = (new CabViewControlType(control.TypeName), control.ControlIndex);
+            await SyncSimulation.inputSemaphore.WaitAsync();
+            }
+
+            var data = await HttpContext.GetRequestDataAsync<CabControlsPost>(WebServer.DeserializationCallback<CabControlsPost>);
+            Console.WriteLine("Data Received:");
+            Console.WriteLine(data.ToString());
+            //TODO the Input given through this WebDeviceState is handled by the MSTSLocomotiveViewer:236 HandleUserInput(), which is usually attached to the player locomotive 
+            // (and therefore only executes commands for that locomotive). 
+            // Either add code to the MSTSLocomotiveViewer so it also sets the values for other trains (messy) 
+            // Or provide a more uncoupled structure that separates input and viewer. 
+
+            var dev = UserInput.WebDeviceState;
+            foreach (var control in data.Controls)
+            {
+                MSTSLocomotive locomotive = null;
+
+                if (control.LocomotiveName != null) {
+                    locomotive = Viewer.Simulator.NameDictionary[control.LocomotiveName].LeadLocomotive as MSTSLocomotive;
+                }
+                var locoName = locomotive.Train.Name;
+
+                var key = (new CabViewControlType(control.TypeName), control.ControlIndex, locoName);
+
+
                 if (!dev.CabControls.TryGetValue(key, out var state))
                 {
                     state = new ExternalDeviceCabControl();
-                    var controls = new Dictionary<(CabViewControlType, int), ExternalDeviceCabControl>(dev.CabControls);
+                    state.Locomotive = locomotive;
+                    var controls = new Dictionary<(CabViewControlType, int, string), ExternalDeviceCabControl>(dev.CabControls);
                     controls[key] = state;
                     dev.CabControls = controls;
                 }
                 state.Value = (float)control.Value;
             }
+            var commands = new List<WorldCommand>();
+            foreach (var command in data.Commands)
+            {
+                commands.Add(WorldCommand.Constructors[command["Command"] as string](command));
+            }
+            dev.WorldCommands = commands;
+
+            SwitchController.UpdateSwitches(data.SwitchCommands);
+
+            if (SyncSimulation.isSyncSimulation)
+            {
+                SyncSimulation.simulationSemaphore.Release();
+                await SyncSimulation.outputSemaphore.WaitAsync();
+            }
+
+
+            //TODO build output data structure to return
+            //await HttpContext.SendDataAsync(((MSTSLocomotiveViewer)Viewer.PlayerLocomotiveViewer).GetWebControlValueList());
+            var output = OutputGenerator.CreateOutput();
+
+            if (SyncSimulation.isSyncSimulation)
+            {
+                SyncSimulation.inputSemaphore.Release();
+            }
+            return output;
+        }
+        #endregion
+
+        #region /API/CAMERASENSOR
+        // SetCabControls() expects a request passing an array of ControlValuePost objects using JSON.
+        // For example:
+        // [{ "TypeName": "THROTTLE"    // A CABViewControlTypes name - must be uppercase.
+        //  , "ControlIndex": 1         // Index of control type in CVF (optional for most controls)
+        //  , "Value": 0.50             // A floating-point value
+        //  }
+        // ]
+
+        [Route(HttpVerbs.Get, "/CAMERASENSOR/{name}")]
+        public byte[] GetCameraSensorData(string name)
+        {
+            foreach (var sensor in Viewer.CameraSensors)
+            {
+                if (sensor.Name.Equals(name)) {
+                    return sensor.EncodedRawData;
+                }
+            }
+            throw HttpException.NotFound($"No camera sensor named {name} found");
+
         }
         #endregion
 
@@ -318,5 +431,12 @@ namespace Orts.Viewer3D.WebServices
         [Route(HttpVerbs.Get, "/MAP")]
         public LatLonDirection LatLonDirection() => Viewer.Simulator.PlayerLocomotive.GetLatLonDirection();
         #endregion
+    }
+
+    struct CabControlsPost
+    {
+        public IEnumerable<ControlValuePost> Controls;
+        public IEnumerable<IDictionary<string, object>> Commands;
+        public IDictionary<uint, int> SwitchCommands;
     }
 }

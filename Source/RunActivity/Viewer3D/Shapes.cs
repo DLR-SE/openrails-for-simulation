@@ -130,20 +130,22 @@ namespace Orts.Viewer3D
     public class StaticShape
     {
         public readonly Viewer Viewer;
-        public readonly WorldPosition Location;
+        public WorldPosition Location;
         public readonly ShapeFlags Flags;
         public readonly SharedShape SharedShape;
+        public ObjectClass Classification;
 
         /// <summary>
         /// Construct and initialize the class
         /// This constructor is for objects described by a MSTS shape file
         /// </summary>
-        public StaticShape(Viewer viewer, string path, WorldPosition position, ShapeFlags flags)
+        public StaticShape(Viewer viewer, string path, WorldPosition position, ShapeFlags flags, ObjectClass classification = ObjectClass.Unknown)
         {
             Viewer = viewer;
             Location = position;
             Flags = flags;
             SharedShape = Viewer.ShapeManager.Get(path);
+            Classification = classification;
         }
 
         public virtual void PrepareFrame(RenderFrame frame, ElapsedTime elapsedTime)

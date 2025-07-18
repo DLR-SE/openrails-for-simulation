@@ -71,7 +71,10 @@ namespace Orts.Viewer3D.Processes
         {
             if (Game.Settings.SoundDetailLevel > 0)
             {
-                Game.WatchdogProcess.Register(WatchdogToken);
+                if (!SyncSimulation.isSyncSimulation)
+                {
+                    Game.WatchdogProcess.Register(WatchdogToken);
+                }
                 Thread.Start();
             }
         }
@@ -138,7 +141,7 @@ namespace Orts.Viewer3D.Processes
                 if (viewer == null)
                     return;
 
-                OpenAL.alListenerf(OpenAL.AL_GAIN, Program.Simulator.Paused ? 0 : (float)Game.Settings.SoundVolumePercent / 100f);
+                OpenAL.alListenerf(OpenAL.AL_GAIN, (Program.Simulator.Paused || SyncSimulation.isSyncSimulation) ? 0 : (float)Game.Settings.SoundVolumePercent / 100f);
 
                 // Update activity sounds
                 if (viewer.Simulator.SoundNotify != Event.None)

@@ -377,6 +377,7 @@ namespace Orts.Viewer3D
 
         public override void Render(GraphicsDevice graphicsDevice, IEnumerable<RenderItem> renderItems, ref Matrix XNAViewMatrix, ref Matrix XNAProjectionMatrix)
         {
+            if (Viewer.MaterialManager.DepthSensorActive) { return; }
             // Adjust Fog color for day-night conditions and overcast
             FogDay2Night(Viewer.World.Sky.SolarDirection.Y, Viewer.Simulator.Weather.OvercastFactor);
 

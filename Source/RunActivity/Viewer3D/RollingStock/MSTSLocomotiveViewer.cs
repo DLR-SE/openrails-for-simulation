@@ -39,12 +39,13 @@ using ORTS.Common;
 using ORTS.Common.Input;
 using ORTS.Scripting.Api;
 using Event = Orts.Common.Event;
+using Orts.Viewer3D.Processes;
 
 namespace Orts.Viewer3D.RollingStock
 {
     public class MSTSLocomotiveViewer : MSTSWagonViewer
     {
-        MSTSLocomotive Locomotive;
+       public MSTSLocomotive Locomotive;
 
         protected MSTSLocomotive MSTSLocomotive { get { return (MSTSLocomotive)Car; } }
 
@@ -63,6 +64,11 @@ namespace Orts.Viewer3D.RollingStock
             : base(viewer, car)
         {
             Locomotive = car;
+
+            if (SyncSimulation.isSyncSimulation)
+            {
+                Locomotive.ShowCab = false;
+            }
 
             string wagonFolderSlash = Path.GetDirectoryName(Locomotive.WagFilePath) + "\\";
             if (Locomotive.CabSoundFileName != null) LoadCarSound(wagonFolderSlash, Locomotive.CabSoundFileName);
@@ -226,6 +232,7 @@ namespace Orts.Viewer3D.RollingStock
         /// <summary>
         /// A keyboard or mouse click has occurred. Read the UserInput
         /// structure to determine what was pressed.
+        /// 
         /// </summary>
         public override void HandleUserInput(ElapsedTime elapsedTime)
         {
@@ -240,60 +247,84 @@ namespace Orts.Viewer3D.RollingStock
             foreach (var external in externalDevices)
             {
                 if (external == null) continue;
+                Console.WriteLine("all control signals:");
+                // TODO the othertrain commands do not reach the cabcontrols dict, look for reason
+                foreach(var kvp in external.CabControls)
+                {
+                    Console.WriteLine($"type: {kvp.Key.Item1.Type}, loco: {kvp.Value.Locomotive.Train.Name}");
+                }
                 // Handle other cabcontrols
                 foreach (var kvp in external.CabControls)
                 {
-                    if (!kvp.Value.Changed) continue;
+                    //if (!kvp.Value.Changed) continue;
                     float val = kvp.Value.Value;
+
+                    // For controlling multiple locos via external device, we get the loco we want to control from the command
+                    MSTSLocomotive currentLoco = kvp.Value.Locomotive;
+                    Console.WriteLine("loco from command:");
+                    Console.WriteLine(currentLoco);
+                    if ( currentLoco != null) 
+                    {
+                        Console.WriteLine(currentLoco.Train.Name);
+                    }
+
+                    if (currentLoco == null) // The command did not specify the loco, therefore we assume the player loco is meant 
+                    {
+                        Console.WriteLine("overriding with player loco");
+                        currentLoco = Locomotive;
+                    }
                     switch (kvp.Key.Item1.Type)
                     {
                         // Some cab controls need specific handling for better results
                         case CABViewControlTypes.THROTTLE:
-                            Locomotive.SetThrottlePercentWithSound(val * 100);
+                            currentLoco.SetThrottlePercentWithSound(val * 100);
+                            Console.WriteLine("Set throttle for train ");
+                            Console.WriteLine(currentLoco.Train.Name);
                             break;
                         case CABViewControlTypes.DIRECTION:
-                            if (Locomotive is MSTSSteamLocomotive steam)
+                            if (currentLoco is MSTSSteamLocomotive steam)
                             {
                                 steam.SetCutoffPercent(val * 100);
                             }
                             else if (val > 0.5f)
-                                Locomotive.SetDirection(Direction.Forward);
+                                currentLoco.SetDirection(Direction.Forward);
                             else if (val < -0.5f)
-                                Locomotive.SetDirection(Direction.Reverse);
+                                currentLoco.SetDirection(Direction.Reverse);
                             else
-                                Locomotive.SetDirection(Direction.N);
+                                currentLoco.SetDirection(Direction.N);
                             break;
                         case CABViewControlTypes.TRAIN_BRAKE:
-                            Locomotive.SetTrainBrakePercent(val * 100);
+                            currentLoco.SetTrainBrakePercent(val * 100);
                             break;
                         case CABViewControlTypes.DYNAMIC_BRAKE:
-                            if (Locomotive.CombinedControlType != MSTSLocomotive.CombinedControl.ThrottleAir)
-                                Locomotive.SetDynamicBrakePercentWithSound(val * 100);
+                            if (currentLoco.CombinedControlType != MSTSLocomotive.CombinedControl.ThrottleAir)
+                                currentLoco.SetDynamicBrakePercentWithSound(val * 100);
                             break;
                         case CABViewControlTypes.ENGINE_BRAKE:
-                            Locomotive.SetEngineBrakePercent(val * 100);
+                            currentLoco.SetEngineBrakePercent(val * 100);
                             break;
                         case CABViewControlTypes.FRONT_HLIGHT:
                             // changing Headlight more than one step at a time doesn't work for some reason
-                            if (Locomotive.Headlight < val - 1)
+                            if (currentLoco.Headlight < val - 1)
                             {
-                                Locomotive.Headlight++;
-                                Locomotive.SignalEvent(Event.LightSwitchToggle);
+                                currentLoco.Headlight++;
+                                currentLoco.SignalEvent(Event.LightSwitchToggle);
                             }
-                            if (Locomotive.Headlight > val - 1)
+                            if (currentLoco.Headlight > val - 1)
                             {
-                                Locomotive.Headlight--;
-                                Locomotive.SignalEvent(Event.LightSwitchToggle);
+                                currentLoco.Headlight--;
+                                currentLoco.SignalEvent(Event.LightSwitchToggle);
                             }
                             break;
                         case CABViewControlTypes.ORTS_SELECTED_SPEED_SELECTOR:
-                            Locomotive.CruiseControl.SelectedSpeedMpS = val;
+                            currentLoco.CruiseControl.SelectedSpeedMpS = val;
                             break;
                         // Other controls can hopefully be controlled faking mouse input
                         // TODO: refactor HandleUserInput() 
                         default:
                             var cabRenderer = ThreeDimentionCabRenderer ?? _CabRenderer;
-                            if (cabRenderer != null && cabRenderer.ControlMap.TryGetValue(kvp.Key, out var renderer) && renderer is CabViewDiscreteRenderer discrete)
+                            var controlMapKey = (kvp.Key.Item1, kvp.Key.Item2);
+                            if (cabRenderer != null && cabRenderer.ControlMap.TryGetValue(controlMapKey, out var renderer) && renderer is CabViewDiscreteRenderer discrete)
                             {
                                 var oldChanged = discrete.ChangedValue;
                                 discrete.ChangedValue = (oldval) => val;

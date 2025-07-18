@@ -397,12 +397,12 @@ namespace Orts.Viewer3D
 
             Activation = new RailDriverButton(1, 0x40);
 
-            CabControls[(new CabViewControlType(CABViewControlTypes.DIRECTION), -1)] = Direction;
-            CabControls[(new CabViewControlType(CABViewControlTypes.THROTTLE), -1)] = Throttle;
-            CabControls[(new CabViewControlType(CABViewControlTypes.TRAIN_BRAKE), -1)] = TrainBrake;
-            CabControls[(new CabViewControlType(CABViewControlTypes.ENGINE_BRAKE), -1)] = EngineBrake;
-            CabControls[(new CabViewControlType(CABViewControlTypes.DYNAMIC_BRAKE), -1)] = DynamicBrake;
-            CabControls[(new CabViewControlType(CABViewControlTypes.FRONT_HLIGHT), -1)] = Lights;
+            CabControls[(new CabViewControlType(CABViewControlTypes.DIRECTION), -1, "PLAYER")] = Direction;
+            CabControls[(new CabViewControlType(CABViewControlTypes.THROTTLE), -1, "PLAYER")] = Throttle;
+            CabControls[(new CabViewControlType(CABViewControlTypes.TRAIN_BRAKE), -1, "PLAYER")] = TrainBrake;
+            CabControls[(new CabViewControlType(CABViewControlTypes.ENGINE_BRAKE), -1, "PLAYER")] = EngineBrake;
+            CabControls[(new CabViewControlType(CABViewControlTypes.DYNAMIC_BRAKE), -1, "PLAYER")] = DynamicBrake;
+            CabControls[(new CabViewControlType(CABViewControlTypes.FRONT_HLIGHT), -1, "PLAYER")] = Lights;
         }
 
         /// <summary>

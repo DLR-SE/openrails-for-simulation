@@ -357,6 +357,7 @@ namespace Orts.Viewer3D
         [CallOnThread("Updater")]
         public void PrepareFrame(RenderFrame frame, ElapsedTime elapsedTime)
         {
+            frame.NextObject(ObjectClass.Car);
             foreach (var car in Cars.Values)
                 car.PrepareFrame(frame, elapsedTime);
         }

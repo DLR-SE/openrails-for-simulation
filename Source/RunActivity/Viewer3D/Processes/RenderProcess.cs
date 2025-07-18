@@ -20,6 +20,8 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Orts.Processes;
+using Orts.Simulation;
+using Orts.Viewer3D.RollingStock;
 using ORTS.Common;
 using System;
 using System.Diagnostics;
@@ -66,6 +68,7 @@ namespace Orts.Viewer3D.Processes
         public static int[] ShadowMapDistance; // distance of shadow map center from camera
         public static int[] ShadowMapDiameter; // diameter of shadow map
         public static float[] ShadowMapLimit; // diameter of shadow map far edge from camera
+
 
         internal RenderProcess(Game game)
         {
@@ -156,7 +159,10 @@ namespace Orts.Viewer3D.Processes
 
         internal void Start()
         {
-            Game.WatchdogProcess.Register(WatchdogToken);
+            if (!SyncSimulation.isSyncSimulation)
+            {
+                Game.WatchdogProcess.Register(WatchdogToken);
+            }
 
             DisplaySize = new Point(GraphicsDevice.Viewport.Width, GraphicsDevice.Viewport.Height);
 
@@ -254,7 +260,7 @@ namespace Orts.Viewer3D.Processes
             }
         }
 
-        internal void Update(GameTime gameTime)
+        internal void Update(GameTime gameTime, TimeSpan SimulatedSeconds)
         {
             if (IsMouseVisible != Game.IsMouseVisible)
                 Game.IsMouseVisible = IsMouseVisible;
@@ -269,7 +275,7 @@ namespace Orts.Viewer3D.Processes
             }
 
             if (gameTime.TotalGameTime.TotalSeconds > 0.001)
-            {
+            { 
                 Game.UpdaterProcess.WaitTillFinished();
 
                 // Must be done in XNA Game thread.
@@ -277,7 +283,11 @@ namespace Orts.Viewer3D.Processes
 
                 // Swap frames and start the next update (non-threaded updater does the whole update).
                 SwapFrames(ref CurrentFrame, ref NextFrame);
-                Game.UpdaterProcess.StartUpdate(NextFrame, gameTime.TotalGameTime.TotalSeconds);
+
+                var timeSpan = SyncSimulation.isSyncSimulation ? SimulatedSeconds : gameTime.TotalGameTime;
+                Game.UpdaterProcess.StartUpdate(NextFrame, timeSpan.TotalSeconds);
+
+
             }
         }
 

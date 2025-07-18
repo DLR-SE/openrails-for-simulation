@@ -1,4 +1,4 @@
-// COPYRIGHT 2010, 2011, 2014 by the Open Rails project.
+﻿// COPYRIGHT 2010, 2011, 2014 by the Open Rails project.
 // 
 // This file is part of Open Rails.
 // 
@@ -217,8 +217,8 @@ namespace Orts.Viewer3D
                 WindSpeedInternalMpS = Vector2.Zero;
                 for (var i = 0; i < windSpeedMpS.Length; i++)
                 {
-                    windSpeedMpS[i].X += ((float)Viewer.Random.NextDouble() * 2 - 1) * WindChangeMpSS[i] * WindUpdateTimer;
-                    windSpeedMpS[i].Y += ((float)Viewer.Random.NextDouble() * 2 - 1) * WindChangeMpSS[i] * WindUpdateTimer;
+                    windSpeedMpS[i].X += ((float)Simulator.Random.NextDouble() * 2 - 1) * WindChangeMpSS[i] * WindUpdateTimer;
+                    windSpeedMpS[i].Y += ((float)Simulator.Random.NextDouble() * 2 - 1) * WindChangeMpSS[i] * WindUpdateTimer;
 
                     var windMagnitude = windSpeedMpS[i].Length() / (i == 0 ? Weather.WindSpeedMpS.Length() * 0.4f : WindSpeedMaxMpS);
 
@@ -246,11 +246,11 @@ namespace Orts.Viewer3D
 
                 // Test to ensure wind direction stays within the direction bandwidth set, if out of bounds set new random direction
                 if (calculatedWindDirection > (BaseWindDirectionRad + WindDirectionVariationRad))
-                    calculatedWindDirection = BaseWindDirectionRad + (WindDirectionVariationRad * (float)Viewer.Random.NextDouble());
+                    calculatedWindDirection = BaseWindDirectionRad + (WindDirectionVariationRad * (float)Simulator.Random.NextDouble());
 
 
                 if (calculatedWindDirection < (BaseWindDirectionRad - WindDirectionVariationRad))
-                    calculatedWindDirection = BaseWindDirectionRad - (WindDirectionVariationRad * (float)Viewer.Random.NextDouble());
+                    calculatedWindDirection = BaseWindDirectionRad - (WindDirectionVariationRad * (float)Simulator.Random.NextDouble());
 
                 Weather.CalculatedWindDirection = calculatedWindDirection;
 

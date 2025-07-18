@@ -18,6 +18,7 @@
 // This file is the responsibility of the 3D & Environment Team. 
 
 using Orts.Common;
+using Orts.Simulation;
 using ORTS.Common;
 using ORTS.Settings;
 using System;
@@ -74,7 +75,7 @@ namespace Orts.Viewer3D.Processes
         /// <summary>
         /// Exposes access to the <see cref="WebServer"/> for the game.
         /// </summary>
-        public WebServerProcess WebServerProcess { get; private set; }
+        public WebServerProcess WebServerProcess { get; set; }
 
         /// <summary>
         /// Exposes access to the <see cref="HostProcess"/> for the game.
@@ -87,6 +88,9 @@ namespace Orts.Viewer3D.Processes
         public GameState State { get { return States.Count > 0 ? States.Peek() : null; } }
 
         Stack<GameState> States;
+
+        private TimeSpan SimulatedSeconds = TimeSpan.FromSeconds(0);
+
 
         /// <summary>
         /// Initializes a new instance of the <see cref="Game"/> based on the specified <see cref="UserSettings"/>.
@@ -102,16 +106,18 @@ namespace Orts.Viewer3D.Processes
             UpdaterProcess = new UpdaterProcess(this);
             LoaderProcess = new LoaderProcess(this);
             SoundProcess = new SoundProcess(this);
-            WebServerProcess = new WebServerProcess(this);
+            //WebServerProcess = new WebServerProcess(this);
             HostProcess = new HostProcess(this);
             States = new Stack<GameState>();
-        }
+    }
 
-        [ThreadName("Render")]
+    [ThreadName("Render")]
         protected override void BeginRun()
         {
+            
             // At this point, GraphicsDevice is initialized and set up.
             HostProcess.Start();
+            Console.WriteLine("calling webserver start");
             WebServerProcess.Start();
             SoundProcess.Start();
             LoaderProcess.Start();
@@ -126,10 +132,14 @@ namespace Orts.Viewer3D.Processes
         {
             // The first Update() is called before the window is displayed, with a gameTime == 0. The second is called
             // after the window is displayed.
-            if (State == null)
+            if (State == null) { 
                 Exit();
+            }
             else
-                RenderProcess.Update(gameTime);
+            {
+                SimulatedSeconds += SyncSimulation.simStepSeconds;
+                RenderProcess.Update(gameTime, SimulatedSeconds);
+            }
             base.Update(gameTime);
         }
 

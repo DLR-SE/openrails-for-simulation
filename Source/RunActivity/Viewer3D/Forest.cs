@@ -54,6 +54,7 @@ namespace Orts.Viewer3D
         {
             if ((Primitive as ForestPrimitive).PrimitiveCount > 0)
             {
+                frame.NextObject(ObjectClass.Unknown);
                 var dTileX = Position.TileX - Viewer.Camera.TileX;
                 var dTileZ = Position.TileZ - Viewer.Camera.TileZ;
                 var mstsLocation = Position.Location + new Vector3(dTileX * 2048, 0, dTileZ * 2048);
@@ -420,7 +421,7 @@ namespace Orts.Viewer3D
         {
             var shader = Viewer.MaterialManager.SceneryShader;
             shader.CurrentTechnique = shader.Techniques["Forest"];
-            if (ShaderPasses == null) ShaderPasses = shader.Techniques["Forest"].Passes.GetEnumerator();
+            ShaderPasses = shader.Techniques["Forest"].Passes.GetEnumerator();
             shader.ImageTexture = TreeTexture;
             shader.ReferenceAlpha = 200;
 
@@ -440,6 +441,8 @@ namespace Orts.Viewer3D
                 {
                     shader.SetMatrix(item.XNAMatrix, ref XNAViewMatrix, ref XNAProjectionMatrix);
                     shader.ZBias = item.RenderPrimitive.ZBias;
+
+                    DepthSensor.ConfigureShader(shader, item);
                     ShaderPasses.Current.Apply();
 
                     // SamplerStates can only be set after the ShaderPasses.Current.Apply().

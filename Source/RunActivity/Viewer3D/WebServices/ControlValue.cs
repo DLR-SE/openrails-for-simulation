@@ -40,6 +40,7 @@ namespace Orts.Viewer3D.WebServices
         public string TypeName;
         public int ControlIndex;
         public double Value;
+        public string LocomotiveName;
     }
 
     public static class LocomotiveViewerExtensions

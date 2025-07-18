@@ -1,0 +1,7 @@
+= Licencing Issues
+
+The simulator is licensed under GPL v3, but the licensing status of the external models and textures it relies on remains unclear. This uncertainty raises questions about whether these external assets can be used in the same way as the simulator itself.
+
+== Textures
+
+Textures that need replacements are described in xref:textures.adoc[Textures].

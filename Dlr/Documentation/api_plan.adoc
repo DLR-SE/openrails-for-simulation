@@ -1,0 +1,71 @@
+= Research Notes
+:toc: left
+
+We want to control the ego train and other entities from outside the simulation framework. 
+A multiplayer mode exists. 
+Commands can be sent over the server interface. 
+The scope is not enough for our use case, because Multiplayer is NOT modeled as a user input. 
+The multiplayer messages set the acceleration of the train on the server directly (see Documentation/Architecture Diagram V1.pdf) without the simulator calculating the physics, because that has already been done on the client. 
+Therefore the multiplayer must not be used in our scenario. 
+See xref:implementation_roadmap.adoc[Implementation Roadmap] for a more detailed analysis.
+For an overview of the multiplayer interface, see xref:multplayer_commnication.adoc[Multiplayer Communication].
+
+Therefore, we research the possibility to implement an interface for simulation clients in the following.
+
+== Input
+
+There exist two ways that autonomous driving functions can receive an input from a simulation client. 
+The simulator already supports inputs from other devices than the keyboard ("external devices"). 
+Currently, two external devices are supported: 
+A Web Server and a bridge to the RailDriver desktop train cab controller.  
+It is possible to build the simulation client as a third external device or to use the web server's API to send control signals.
+
+=== Simulation Client as External Device
+
+The simulation client can be implemented as external device similarly to the RailDriver. 
+The RailDriver updates its information asynchronuously and writes it into a static `RailDriverState` object which derives from `ExternalDeviceState`. 
+This `RailDriverState` object is part of the `UserInput` class and from it, all inputs are read in `MSTSLocomotiveViewer::HandleUserInput()`. 
+The inputs override the inputs given via Keyboard and Mouse. 
+Afterward, the simulation is stepped using the given inputs.
+
+The client can be implemented as a new ExternalDevice (`UserInputSimClient`) which writes its received content into a `SimClientState` object. 
+The receiving and writing needs to be conducted synchronously, e.g. by waiting for the input in the `RenderProcess::Update` method. 
+The `SimClientState` object needs to become part of `UserInput` and needs to be evaluated in  `MSTSLocomotiveViewer::HandleUserInput()`, similar to `RailDriverState`.
+
+The POST endpoint seems to be blocked by default, as it returns 405 forbidden. 
+In order to implement this solution, removing the block is necessary.
+
+=== Simulation Client via Web Server
+
+The web server of OpenRails contains a POST method `/API/CABCONTROLS` to set vehicle controls:
+
+[source]
+----
+// SetCabControls() expects a request passing an array of ControlValuePost objects using JSON.
+// For example:
+// [{ "TypeName": "THROTTLE"    // A CABViewControlTypes name - must be uppercase.
+//  , "ControlIndex": 1         // Index of control type in CVF (optional for most controls)
+//  , "Value": 0.50             // A floating-point value
+//  }
+// ]
+----
+(see `WebServer::SetCabControls()`)
+
+This can be used to set values by writing an external program which sends http messages containing the JSON commands required by the API. 
+The `TypeName` can be anything from `CABViewControlTypes` and seems to cover all inputs.
+
+
+== Output
+
+* Output can be collected after each `UpdateProcess.Update()` call in the `RenderProcess` main loop
+* At this point, the relevant information should be collected from the Simulator State and published via a defined Interface (completing the I/O loop)
+* Simulation State is held in the `Simulator` class
+* Train State is located `Simulator.Trains`
+* Train State contains detailed information about probably most of the relevant (physical) states `Orts.Simulation.Simulation.Physics.Train.cs`
+* Signal State is located in `Simulator.Signals`. This seems to contain the singalling logic. The state of individual Signals seems to be held in `Signals.SignalObjects`. 
+* The signalling logic seems particularly complicated in its implementation. Getting the necessary information out of it will be hard. There are at least 3 different types of objects used at the same abstraction Layer which reference signalling (`SignalObject`, `SignalRefObject`, `SignalWorldObject`) and they are used in different contexts. Documentation is rare.
+
+== Chosen Approach
+
+After consideration of the options, using the web server was chosen as the interface for the simulation client. 
+Some changes were made to the OpenRails codebase to support synchronous simulation and output of state information as a response to commands sent to the web server interface. The implementation and architecture is documented in xref:openrails_test_platform.adoc[Testing Platform Documentation].

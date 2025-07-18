@@ -109,6 +109,7 @@ namespace Orts.Viewer3D
         [CallOnThread("Updater")]
         public void PrepareFrame(RenderFrame frame, ElapsedTime elapsedTime)
         {
+            frame.NextObject(ObjectClass.Terrain);
             var tiles = TerrainTiles;
             foreach (var tile in tiles)
                 tile.PrepareFrame(frame, elapsedTime);
@@ -519,10 +520,13 @@ namespace Orts.Viewer3D
             var shader = Viewer.MaterialManager.SceneryShader;
             var level9_3 = Viewer.Settings.IsDirectXFeatureLevelIncluded(ORTS.Settings.UserSettings.DirectXFeature.Level9_3);
             shader.CurrentTechnique = shader.Techniques[level9_3 ? "TerrainLevel9_3" : "TerrainLevel9_1"];
-            if (ShaderPasses == null) ShaderPasses = shader.Techniques[level9_3 ? "TerrainLevel9_3" : "TerrainLevel9_1"].Passes.GetEnumerator();
+            ShaderPasses = shader.Techniques[level9_3 ? "TerrainLevel9_3" : "TerrainLevel9_1"].Passes.GetEnumerator();
             shader.ImageTexture = PatchTexture;
-            shader.OverlayTexture = PatchTextureOverlay;
-            shader.OverlayScale = OverlayScale;
+            if (shader is SceneryShader)
+            {
+                ((SceneryShader)shader).OverlayTexture = PatchTextureOverlay;
+                ((SceneryShader)shader).OverlayScale = OverlayScale;
+            }
 
             graphicsDevice.BlendState = BlendState.NonPremultiplied;
         }
@@ -538,6 +542,8 @@ namespace Orts.Viewer3D
                 {
                     shader.SetMatrix(item.XNAMatrix, ref XNAViewMatrix, ref XNAProjectionMatrix);
                     shader.ZBias = item.RenderPrimitive.ZBias;
+                    if (shader is DepthSensorShader)
+                        (shader as DepthSensorShader).ObjectClassifier = (int)ObjectClass.Terrain * 0.125f;
                     ShaderPasses.Current.Apply();
                     // SamplerStates can only be set after the ShaderPasses.Current.Apply().
                     graphicsDevice.SamplerStates[0] = SamplerState.LinearWrap;

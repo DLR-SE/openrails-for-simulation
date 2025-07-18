@@ -1,0 +1,31 @@
+= License Statements
+
+== car_blue.s
+
+*Blender 3D Model*: Obtained from https://www.blenderkit.com/asset-gallery-detail/a45138ab-309e-4256-89a2-4a38a75cd781/, licensed under the Royalty-Free license as defined here: https://www.blenderkit.com/docs/licenses/ 
+
+*Textures*: Created by Carl Schneiders (as a DLR employee) using Inkscape.
+
+Texture files: car-texture.dds
+
+== tree.s:
+
+- Original model and textures: "Trees Low Poly" (https://skfb.ly/6YpAS) by Igor_K. is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
+- Converted with Blender by Jan Steffen Becker (DLR-SE)
+- Texture files: 1234.dds, bark03.dds
+
+== level_crossing.s
+
+Own work by Jan Steffen Becker (DLR-SE)
+
+Texture files: road.dds, level_crossing_middle.dds
+
+== signal.s
+
+Own work by Jan Steffen Becker (DLR-SE)
+
+Texture files: signal-black.dds, signal-light-circle.dds
+
+== Other textures:
+
+- acleantrack1.dds, acleantrck2.dds, terrain.dds: Own work by Jan Steffen Becker (DLR-SE)

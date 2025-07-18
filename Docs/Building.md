@@ -29,7 +29,8 @@ Download and install Visual Studio 2019 Community Edition from Microsoft.
 
 ![](images/configure_visual_studio_installer.png)
 
-The only "workload" needed is .NET desktop development. Some optional tools which may be useful are also checked.<p>&nbsp;</p>
+The "workload" needed is .NET desktop development. Some optional tools which may be useful are also checked.
+Additionally, install .NET Core 3.1 Runtime via the "individual components" tab. It is labelled as "no longer supported" but needed by parts of OpenRails. <p>&nbsp;</p>
 
 ![](images/run_visual_studio_installer.png)
 

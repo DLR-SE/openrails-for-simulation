@@ -139,11 +139,13 @@ namespace Orts.MultiPlayer
             if (p == null)
             {
                 p = new OnlinePlayer(null, null);
+                Console.WriteLine("New player spawned");
             }
             p.url = player.url;
             p.LeadingLocomotiveID = player.leadingID;
             p.con = MPManager.Simulator.BasePath + "\\TRAINS\\CONSISTS\\" + player.con;
             p.path = MPManager.Simulator.RoutePath + "\\PATHS\\" + player.path;
+            Console.WriteLine("creating train");
             Train train = new Train(MPManager.Simulator);
             train.TrainType = Train.TRAINTYPE.REMOTE;
             if (MPManager.IsServer()) //server needs to worry about correct train number
@@ -157,6 +159,7 @@ namespace Orts.MultiPlayer
             int direction = player.dir;
             train.travelled = player.Travelled;
             train.TrainMaxSpeedMpS = player.trainmaxspeed;
+            Console.WriteLine("train created");
 
             if (MPManager.IsServer())
             {
@@ -181,7 +184,7 @@ namespace Orts.MultiPlayer
                 {
                     MPManager.BroadCast((new MSGMessage(player.user, "Error", "MultiPlayer Error：" + e.Message)).ToString());
                 }
-                else throw new Exception();
+                else throw e;
             }
             string[] faDiscreteSplit;
             List<LoadData> loadDataList = new List<LoadData>();
@@ -247,6 +250,8 @@ namespace Orts.MultiPlayer
             Train.TCSubpathRoute tempRoute = train.CalculateInitialTrainPosition(ref canPlace);
             if (tempRoute.Count == 0 || !canPlace)
             {
+                Console.WriteLine("temp Route: [" + string.Join(", ", tempRoute) + "]");
+                Console.WriteLine("Can place: " + canPlace.ToString());
                 MPManager.BroadCast((new MSGMessage(p.Username, "Error", "Cannot be placed into the game")).ToString());//server will broadcast this error
                 throw new InvalidDataException("Remote train original position not clear");
             }

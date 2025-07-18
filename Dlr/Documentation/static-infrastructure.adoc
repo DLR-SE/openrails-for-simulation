@@ -1,0 +1,238 @@
+= Route Generation
+:toc: left
+
+This document aims to provide a strategy on how to automatically generate routes for OpenRails. 
+For this, it collects the necessary information on OR route, world and asset files and structures.
+
+The immediate goal is to be able to generate and understand a minimal working example manually so this can serve as a basis for automated route/world generation. 
+The source for the automatic generation should be an established standard, like EULynx.
+
+
+== File Types and Directory Structure
+
+The file types and directory structure are a subset of those used by Microsoft Train Simulator (MSTS).
+
+See here for more information: https://open-rails.readthedocs.io/en/latest/compatibility.html
+
+More detailed folder structure explanation (MSTS specific): https://tsforum.forumotion.net/t554-msts-helpful-facts-and-links-part-29-msts-folder-content-by-alec-and-ged
+
+And here (german): https://forum.german-railroads.de/index.php?page=Thread&threadID=3220
+
+
+There are a number of specific files necessary to run (e.g. `sigcfg.dat`, `sigscr.dat`), these need to be bundled with a automatic route building tool.
+
+Routes need track and train sets, either originally from MSTS or specific open source track sets.
+
+In order to open a route in TrackViewer, you need to first set its working directory (called "installation directory") via File -> Select Install Folder -> Navigate to the dir where you keep your routes. 
+Then you can use File -> select route to navigate to the route you want to edit.
+
+== Units
+
+=== Measuring and Locations
+
+From The TrackViewer Manual: http://www.openrails.org/assets/files/ORTS_Trackviewer_manual.pdf
+
+Locations in MSTS and hence ORTS are stored using a tile-based system. 
+Tiles are square area's of 2048m x 2048m. 
+The x-direction is along east-west axis. 
+The z-direction is approximately along south-north axis. 
+The y-direction is the height above the reference level.
+
+The tile is given by two integers (called tileX and tileZ). 
+Within such a tile the location is given using an offset in the x- and z-directions from the middle of the tile (so running from -1024m to +1024m).
+
+=== World Location
+
+The projection that MSTS uses to translate real world-locations on a sphere to the flat tile-based locations is called Goode Homolosine projection. 
+This is a complicated and not-often used projection. 
+We can use this projection to calculate the approximate real world location in Longitude (negative is West, positive East) and Latitude (negative is South, positive is North).
+
+
+== Static Infrastructure
+
+The physical objects rendered by the OR game engine. These can be defined within TSRE.
+
+* Tracks
+* Signalling
+* Buildings
+* Other Objects
+
+=== The World Files
+
+The world is split in tiles. 
+The object in each tile are described in files located in `/world`. 
+Each file is named by its tile coordinates.
+
+Within each file, the objects in the world are declared. 
+The relevant objects and their attributes are described here:
+
+==== TrackObj
+
+The TrackObj defines a section of a Track with fixed length and curvature. 
+It is characterized by the following attributes:
+
+* UInt SectionIDx: Identifies in which section from `tsection.dat` this element is located
+* Float Elevation: Probably defines a factor related to super-elevation ("Überhöhung", making the outer track higher to allow faster curve speeds)
+* UInt CollideFlags: Unknown, no usage visible
+* String FileName: Name of the .s shape file for rendering
+* UInt StaticFlags: Flags for the renderer, see enum `WorldFile::StaticFlag` for options
+* STFPositionItem Position: space-separated x, y and z coordinates of the track within the world tile (TODO: which point of the track object is located?)
+* STFDirectionItem QDirection: space-separated elements of a quaternion describing the rotation of the object. See https://danceswithcode.net/engineeringnotes/quaternions/quaternions.html 
+* UInt VDbId: Seems to be some identifier, but never used (maybe just a primary key?)
+
+
+==== DynTrackObj
+
+![dynamic-tracks-logical-view.png](images/dynamic-tracks-logical-view.png)
+
+
+
+=== The Track Database (.tdb)
+
+The tracks, junctions, end-nodes and various track items like sidings, crossings, signals etc are defined in the track data base (.tdb file). 
+Tracks are pieces of track (or roads) along which a train or car can move. 
+These tracks are bounded by either end-nodes or junctions. 
+All of these things have indexes that are given at the bottom. 
+Junctions, end-nodes and other track items also have a precise location (tracks, in contrast, are not at a certain point, but are basically curved lines).
+
+A track in the track database is stored as a so-called vectornode. 
+Such a vector node consists of a number of sections, each one normally either straight or curved. 
+The sections are named with the suffix ".s" (e.g. A2t500r10d.s). 
+Each section has an index. 
+Additionally, there is a shape index probably identifying the track in which the section is located.
+
+
+=== The Path File (.pat)
+
+Contains Information on the paths that a train can follow along the tracks. 
+They are directional. 
+Paths can be defined within the OR Track Viewer. 
+If the Static Infrastructure is altered, paths may become corrupted and need to be re-designed.
+The .pat file contains this information in a way that abstracts from the physical layout of the tracks. 
+Mostly this is the location of nodes and how they are connected.
+There is no relation made to the track database. 
+The nodes can have additional attributes, such as start, end, reversal, etc.
+
+
+=== Trains
+
+Visualization and Parameters of a train.
+
+
+== Minimal Working Example
+
+=== Which files are necessary for MWE
+
+* \<name\>.tdb
+* \<name\>.trk
+* sigcfg.dat
+* ttype.dat
+* at least one `paths/*.pat` file
+
+=== Which files can be removed for MWE
+
+* carspawn.dat (may be necessary for mwe)
+* deer.haz
+* forests.dat
+* graphics.ace
+* \<name\>.rdb
+* \<name\>.ref
+* \<name\>.rit 
+* \<name\>.tit
+* sigscr.dat
+* speedpost.dat
+* spotter.haz
+* ssource.dat
+* telepole.dat
+* tsection.dat
+
+
+== STF file Grammar
+
+STF_File ::= 'SIMISA@@@@@@@@@@JINX0T0t______' NEWLINE NEWLINE Item*
+
+Item ::= Object | INT | FLOAT | STRING 
+Object ::= ID '(' Item* ')'
+
+INT: decimal integer with optional sign
+FLOAT: decimal number or integer with optional sign and unit; unit consists of arbitrary characters, no spaces between number and unit
+STRING: double-quoted string
+
+Comments: any Object starting with an underscore or '#'.
+
+== File Contents
+
+In the following, the known objects are described as templates. The following notation is used.
+
+* Object types are described as a template of the form `ID ( Items )` as in the grammar above. Hereby, the following prefixes and suffixes are used to describe the items. 
+* Prefix '$' denotes an object of known type
+* Prefix '#' denotes the length of a list, usually the number of following objects 
+* Items may be named in the form `varname:type`. This is used for primitive type object attributes
+* Items without known meaning (reserved items?) are written inline in the template
+* Suffix '?' denotes an optional item 
+* Suffixes '*' and '+' denotes an arbitrary number resp. at least one item
+* Alternatives are separated by '|'
+
+== Track Data Base
+
+[source]
+----
+TrackDB ( Serial ( 0 ) $TrackNodes? $TrackItems? )
+
+TrackNodes ( #trackNodes $TrackNode+ )
+TrackItems ( #trackItems $TrItem )
+
+TrackNode ( $UID $TrJunctionNode? $TrVectorNode? $TrEndNode? $TrPins? )
+TrPins ( #inPins #outPins inPins:$TrPin* outPins:TrPin* )
+TrPin ( link:INT direction:INT )
+
+UiD ( worldTileX:INT worldTileZ:INT world:INT 0 tileX:INT tileZ:INT x:FLOAT y:FLOAT z:FLOAT ax:FLOAT ay:FLOAT az:FLOAT )
+TrJunctionNode ( 0 shapeIndex:INT 0 )
+TrVectorNode ( $TrVectorSections? $TrItemRefs )
+TrVectorSections ( #trVectorSections $TrVectorSection* )
+TrVectorSection ::= sectionIndex:INT shapeIndex:INT wfNameX:INT wfNameY:INT worldFileUiD:INT 0 1 00 tileX:INT tileY:INT x:FLOAT y:FLOAT z:FLOAT ax:FLOAT ay:FLOAT az:FLOAT
+----
+
+== Strategy for Developing Automated Route Generation
+
+A Route consists of a high number of individual files with proprietary file types. 
+The file structure and contents are roughly explained below. 
+Generating all of these files automatically would be a big initial challenge, given the lack of documentation.
+
+Therefore the following strategy is proposed:
+
+Start from a pre-generated minimal route. 
+Build a tool that is able to automatically edit the following files:
+
+* `carspawn.dat`
+* `<route_name>.tdb`
+* `<route_name>.trk`
+* `world/*.w`
+
+
+These files seem to be the minimal files that need to be altered if the route is altered. 
+They also are relatively straightformward to read even without documentation. 
+For the defining a track layout and spawning one train at a specific place, this should suffice. 
+Additional features can then be built by adding functionality to edit these files or edit other files in the same way (e.g.`sigcfg.dat` for editing signalling). 
+Ideally, the software should be built in a way so that at some point, all aspects of routes can be edited and therefore a route can be generated by the software with no need for an initial file structure to be created externally.
+
+* Use only Dynamic Tracks?
+* STF dformat see STFReader
+
+== Unsorted Information
+
+**Signal Scripting**
+
+Signals are declared in sigcfg.dat.
+From there the signal scripting logic is referenced. 
+The script is located in a .dat-file (sigscr.dat seems to be the default) and is written in TrainzScript code (https://www.trainz.de/lexikon/entry/57-grundlagen-kapitel-1-die-scriptsprache-und-ihre-syntax/).
+
+**STF Data format**
+
+The MSTS files use a Structured Text Format and a binary equivalent in its route files. 
+The file formats are described in `STFReader.cs`.
+
+**Existing Tools for reading MSTS files**
+
+Simis Editor: https://github.com/twpol/msts-tools 
+

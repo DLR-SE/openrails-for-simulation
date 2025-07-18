@@ -29,6 +29,7 @@ using Orts.Simulation;
 using Orts.Simulation.Physics;
 using Orts.Simulation.RollingStocks;
 using Orts.Simulation.Signalling;
+using Orts.Viewer3D.Processes;
 using ORTS.Common;
 using ORTS.Common.Input;
 using ORTS.Settings;
@@ -126,15 +127,20 @@ namespace Orts.Viewer3D
         /// <summary>
         /// Switches the <see cref="Viewer3D"/> to this camera, updating the view information.
         /// </summary>
-        public void Activate()
+        public void Activate(bool makeCurrent=true, float ratio=0.0f)
         {
-            ScreenChanged();
-            OnActivate(Viewer.Camera == this);
-            Viewer.Camera = this;
-            Viewer.Simulator.PlayerIsInCab = Style == Styles.Cab || Style == Styles.ThreeDimCab;
+            
+            ScreenChanged(ratio);
+            OnActivate(!makeCurrent || Viewer.Camera == this);
+            if (makeCurrent)
+            {
+                Viewer.Camera = this;
+                Viewer.Simulator.PlayerIsInCab = Style == Styles.Cab || Style == Styles.ThreeDimCab;
+            }
             Update(ElapsedTime.Zero);
             xnaView = GetCameraView();
-            SoundBaseTile = new Point(cameraLocation.TileX, cameraLocation.TileZ);
+            if (makeCurrent)
+                SoundBaseTile = new Point(cameraLocation.TileX, cameraLocation.TileZ);
         }
 
         /// <summary>
@@ -168,9 +174,9 @@ namespace Orts.Viewer3D
         /// <summary>
         /// Notifies the camera that the screen dimensions have changed.
         /// </summary>
-        public void ScreenChanged()
+        public void ScreenChanged(float ratio=0.0f)
         {
-            var aspectRatio = (float)Viewer.DisplaySize.X / Viewer.DisplaySize.Y;
+            var aspectRatio = ratio == 0.0f ? (float)Viewer.DisplaySize.X / Viewer.DisplaySize.Y : ratio;
             var farPlaneDistance = SkyPrimitive.RadiusM + 100;  // so far the sky is the biggest object in view
             var fovWidthRadians = MathHelper.ToRadians(FieldOfView);
             if (Viewer.Settings.DistantMountains)
@@ -186,10 +192,13 @@ namespace Orts.Viewer3D
         /// </summary>
         /// <param name="frame"></param>
         /// <param name="elapsedTime"></param>
-        public void PrepareFrame(RenderFrame frame, ElapsedTime elapsedTime)
+        public void PrepareFrame(RenderFrame frame, ElapsedTime elapsedTime, Boolean makeCurrent=true)
         {
             xnaView = GetCameraView();
-            frame.SetCamera(this);
+            if (makeCurrent)
+            {
+                frame.SetCamera(this);
+            }
             frustumLeft.X = -xnaView.M11 * frustumRightProjected.X + xnaView.M13 * frustumRightProjected.Z;
             frustumLeft.Y = -xnaView.M21 * frustumRightProjected.X + xnaView.M23 * frustumRightProjected.Z;
             frustumLeft.Z = -xnaView.M31 * frustumRightProjected.X + xnaView.M33 * frustumRightProjected.Z;
@@ -201,8 +210,18 @@ namespace Orts.Viewer3D
         }
 
         // Cull for fov
-        public bool InFov(Vector3 mstsObjectCenter, float objectRadius)
+        public bool InFov(Vector3 mstsObjectCenter, float objectRadius, bool propagate=true)
         {
+            if (propagate)
+            {
+                foreach (var sensor in Viewer.CameraSensors)
+                {
+                    if (sensor.Camera.InFov(mstsObjectCenter, objectRadius, false))
+                    {
+                        return true;
+                    }
+                }
+            }
             mstsObjectCenter.X -= cameraLocation.Location.X;
             mstsObjectCenter.Y -= cameraLocation.Location.Y;
             mstsObjectCenter.Z -= cameraLocation.Location.Z;
@@ -216,8 +235,18 @@ namespace Orts.Viewer3D
         }
 
         // Cull for distance
-        public bool InRange(Vector3 mstsObjectCenter, float objectRadius, float objectViewingDistance)
+        public bool InRange(Vector3 mstsObjectCenter, float objectRadius, float objectViewingDistance, bool propagate=true)
         {
+            if (propagate)
+            {
+                foreach (var sensor in Viewer.CameraSensors)
+                {
+                    if (sensor.Camera.InRange(mstsObjectCenter, objectRadius, objectViewingDistance, false))
+                    {
+                        return true;
+                    }
+                }
+            }
             mstsObjectCenter.X -= cameraLocation.Location.X;
             mstsObjectCenter.Z -= cameraLocation.Location.Z;
 
@@ -236,12 +265,12 @@ namespace Orts.Viewer3D
         /// we can see it.   The objectViewingDistance allows a small object
         /// to specify a cutoff beyond which the object can't be seen.
         /// </summary>
-        public bool CanSee(Vector3 mstsObjectCenter, float objectRadius, float objectViewingDistance)
+        public bool CanSee(Vector3 mstsObjectCenter, float objectRadius, float objectViewingDistance, bool propagate=true)
         {
-            if (!InRange(mstsObjectCenter, objectRadius, objectViewingDistance))
+            if (!InRange(mstsObjectCenter, objectRadius, objectViewingDistance, propagate))
                 return false;
 
-            if (!InFov(mstsObjectCenter, objectRadius))
+            if (!InFov(mstsObjectCenter, objectRadius, propagate))
                 return false;
 
             return true;
@@ -554,6 +583,12 @@ namespace Orts.Viewer3D
         protected virtual void RotateRight(float speed)
         {
             RotationYRadians += speed;
+            MoveCamera();
+        }
+
+        public void SetRotationY(float rotation)
+        { 
+            RotationYRadians = rotation;
             MoveCamera();
         }
 
@@ -1975,7 +2010,7 @@ namespace Orts.Viewer3D
 
     public class CabCamera : NonTrackingCamera
     {
-        private readonly SavingProperty<bool> LetterboxProperty;
+        protected SavingProperty<bool> LetterboxProperty;
         protected int[] sideLocation = new int[2];
         public int SideLocation { get { return attachedCar == null? sideLocation[0] : (attachedCar as MSTSLocomotive).UsingRearCab ? sideLocation[1] : sideLocation[0]; } }
 
@@ -2184,7 +2219,7 @@ namespace Orts.Viewer3D
         /// Sets direction for view out of cab front window. Also called when toggling between full screen and windowed.
         /// </summary>
         /// <param name="attachedCar"></param>
-        public void InitialiseRotation(TrainCar attachedCar)
+        public virtual void InitialiseRotation(TrainCar attachedCar)
         {
             if (attachedCar == null) return;
 
@@ -2222,6 +2257,46 @@ namespace Orts.Viewer3D
                     Initialize();
             }
         }
+    }
+
+    public class OnTrainSensorCamera : CabCamera
+    {
+        public float AspectRatio;
+        public TrainCar SensorHost; 
+        public OnTrainSensorCamera(Viewer viewer, float aspectRatio, TrainCar sensorHost, float fov = 45.0f, float rotationX = 0.0F, float rotationY = 0.0F)
+            : base(viewer)
+        {
+            RotationXRadians = rotationX;
+            RotationYRadians = rotationY;
+            AspectRatio = aspectRatio;
+            FieldOfView = fov;
+            SensorHost = sensorHost;
+            ScreenChanged(fov);
+        }
+
+        protected override List<TrainCar> GetCameraCars()
+        {
+            // Cab camera is only possible on the player locomotive.
+            return new List<TrainCar>(new[] { SensorHost });
+        }
+
+        /// <summary>
+        /// Sets direction for view out of cab front window. Also called when toggling between full screen and windowed.
+        /// </summary>
+        /// <param name="attachedCar"></param>
+        public override void InitialiseRotation(TrainCar attachedCar)
+        {
+            //if (attachedCar == null) return;
+
+            //var loco = attachedCar as MSTSLocomotive;
+            //var viewpoint = (loco.UsingRearCab)
+            //? loco.CabViewList[(int)CabViewType.Rear].ViewPointList[sideLocation[1]]
+            //: loco.CabViewList[(int)CabViewType.Front].ViewPointList[sideLocation[0]];
+
+            //RotationXRadians = 0.0F; //MathHelper.ToRadians(viewpoint.StartDirection.X) - RotationRatio * (Viewer.CabYOffsetPixels + Viewer.CabExceedsDisplay / 2);
+            ////RotationYRadians = rotation;
+        }
+
     }
 
     public class TracksideCamera : LookAtCamera

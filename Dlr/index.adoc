@@ -1,0 +1,14 @@
+= OpenRails Test Platform
+
+This documentation describes the simulation-based testing platform for autonomous driving functions in trains based on the OpenRails Simulator, which is developed within the INTRA project by DLR.
+The documentation is split into the following parts:
+
+xref:Documentation/openrails_test_platform.adoc[Testing Platform Documentation]: This section describes the architecture and usage of the testing platform.
+
+link:Documentation/depth-sensors.md[Depth Sensor]: This section describes the implementation and usage of a sensor providing depth and semantic information.
+
+xref:Documentation/static-infrastructure.adoc[Static Infrastructure]: This section describes the file types and structures that are used by OpenRails to describe static infrastucture, i.e., tracks, signalling etc.
+
+xref:Documentation/api_plan.adoc[Research]: This section contains notes on how OpenRails works and which components can (not) be used to build a simulation platform for OpenRails. This can be helpful for further development.
+
+xref:Documentation/licencing-issues.adoc[Licencing Issues]: The simulator is licensed under GPL v3, but the licensing status of the external models and textures it relies on remains unclear. This uncertainty raises questions about whether these external assets can be used in the same way as the simulator itself.

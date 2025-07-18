@@ -27,6 +27,7 @@ using ORTS.Common;
 
 namespace ORTS.Settings
 {
+
     [AttributeUsage(AttributeTargets.Property)]
     public sealed class DefaultAttribute : Attribute
     {
@@ -49,6 +50,7 @@ namespace ORTS.Settings
         public static readonly string UserDataFolder;     // ie @"C:\Users\Wayne\AppData\Roaming\Open Rails"
         public static readonly string DeletedSaveFolder;  // ie @"C:\Users\Wayne\AppData\Roaming\Open Rails\Deleted Saves"
         public static readonly string SavePackFolder;     // ie @"C:\Users\Wayne\AppData\Roaming\Open Rails\Save Packs"
+
 
         static UserSettings()
         {

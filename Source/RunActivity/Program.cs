@@ -16,6 +16,7 @@
 // along with Open Rails.  If not, see <http://www.gnu.org/licenses/>.
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -52,6 +53,13 @@ namespace Orts
         [ThreadName("Render")]
         static void Main(string[] args)
         {
+            var additionalParameters = ExtractKeyValuePairs(ref args);
+            var portString = GetValueForKey(additionalParameters, "port");
+            var port = 0;
+            if (portString != null) {
+                port = int.Parse(portString);
+            }
+            
             var options = args.Where(a => a.StartsWith("-") || a.StartsWith("/")).Select(a => a.Substring(1));
             var settings = new UserSettings(options);
 
@@ -59,10 +67,55 @@ namespace Orts
             string path = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "Native");
             path = Path.Combine(path, (Environment.Is64BitProcess) ? "X64" : "X86");
             NativeMethods.SetDllDirectory(path);
-
             var game = new Game(settings);
-            game.PushState(new GameStateRunActivity(args));
+            var startPaused = true;
+            if (portString != null)
+            {
+                startPaused = false;
+                game.Settings.WebServerPort = port;
+            }
+            game.PushState(new GameStateRunActivity(args, startPaused));
+           
+
+            game.WebServerProcess = new WebServerProcess(game);
+
             game.Run();
         }
+
+        static string GetValueForKey(string[] keyValuePairs, string key)
+        {
+            foreach (var pair in keyValuePairs)
+            {
+                string[] parts = pair.Split('=');
+                if (parts.Length == 2 && parts[0] == key)
+                {
+                    return parts[1];
+                }
+            }
+            return null; // Key not found
+        }
+
+        static string[] ExtractKeyValuePairs(ref string[] args)
+        {
+            List<string> extractedArgs = new List<string>();
+            List<string> remainingArgs = new List<string>();
+
+            foreach (var arg in args)
+            {
+                if (arg.Contains("="))
+                {
+                    extractedArgs.Add(arg);
+                }
+                else
+                {
+                    remainingArgs.Add(arg);
+                }
+            }
+
+            args = remainingArgs.ToArray();
+            return extractedArgs.ToArray();
+        }
+
+
     }
 }

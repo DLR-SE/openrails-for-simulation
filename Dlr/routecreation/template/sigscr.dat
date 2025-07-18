@@ -1,0 +1,43 @@
+// Combined signal
+SCRIPT Ks
+
+	// imports
+	extern float	block_state (); // state of the protected block(s)
+	extern float	route_set (); // route assigned to the protected block(s)
+	extern float	next_sig_lr (); // least restrictive signal aspect ahead
+	extern float	def_draw_state (); // map signal state to the displayed state?
+	extern float	state; // the signal aspect
+	extern float	draw_state; // the shown aspect
+	extern float	enabled; // whether this signal is enabled
+	
+	// local declarations
+	float			approaching_signal;
+
+	// logic
+    if (enabled)
+	{
+	    if (route_set() && block_state() ==# BLOCK_CLEAR)
+		{
+			approaching_signal = next_sig_lr (SIGFN_NORMAL);
+			if (approaching_signal ==# SIGASP_STOP)
+			{
+				state = SIGASP_APPROACH_3;
+			}
+			else
+			{
+				state = SIGASP_CLEAR_2;
+			}
+		}
+		else
+		{
+			// this is the default state
+			state = SIGASP_STOP;
+		}
+	}
+	else
+	{
+		// we use stop as the fallback state
+		state = SIGASP_STOP;
+	}
+	
+	draw_state = def_draw_state (state);

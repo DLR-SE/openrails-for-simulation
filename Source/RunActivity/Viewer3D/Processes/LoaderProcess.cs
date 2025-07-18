@@ -47,7 +47,10 @@ namespace Orts.Viewer3D.Processes
 
         public void Start()
         {
-            Game.WatchdogProcess.Register(WatchdogToken);
+            if (!SyncSimulation.isSyncSimulation)
+            {
+                Game.WatchdogProcess.Register(WatchdogToken);
+            }
             Thread.Start();
         }
 
