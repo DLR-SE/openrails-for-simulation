@@ -1,5 +1,3 @@
-# INTRA2
-
 # OpenRails for Simulation
 
 
