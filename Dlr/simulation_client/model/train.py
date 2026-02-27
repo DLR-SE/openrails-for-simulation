@@ -10,6 +10,7 @@ from simulation_client.communication.train_command_comm import CommunicationSimu
 from simulation_client.model.sensor import Sensor
 from simulation_client.model.train_properties import extract_properties
 from simulation_client.openrails_interface.open_rails_server_interface import OpenRailsServer
+from routecreation.openrails_data import DEFAULT_START_TILE, TILE_SIZE
 
 SPEED = float
 
@@ -19,7 +20,7 @@ class Train:
 
     def __init__(self, server: OpenRailsServer, consist: str, route: str = None, name: str = None,
                  path_number: int = None, is_ego: bool = False,
-                 communication_sim: CommunicationSimulation = None):
+                 communication_sim: CommunicationSimulation = None, start_tile: Tuple[int, int] = DEFAULT_START_TILE):
         self.properties = extract_properties(consist)
         self.id = uuid.uuid4()
         self.is_ego = is_ego
@@ -56,6 +57,8 @@ class Train:
             self.communication_sim = InstantCommunication()
         else:
             self.communication_sim = communication_sim
+
+        self.start_tile_x, self.start_tile_z = start_tile
 
     def set(self,
             direction=None,
@@ -112,10 +115,9 @@ class Train:
 
         train_name = self.name if not self.is_ego else "PLAYER"
         own_train_state = state["trains"][train_name]
-        location_vector = own_train_state["location"]
 
         # TODO IS THIS THE CORRECT ORDER?
-        self.location = location_vector["z"], location_vector["x"], location_vector["y"]
+        self.location = self._parse_location(own_train_state["location"])
         self.velocity_current_mps = own_train_state["locomotiveState"]["v"]
         self.acceleration = own_train_state["locomotiveState"]["a"]
         self.distance_travelled = own_train_state["locomotiveState"]["distance"]
@@ -130,3 +132,9 @@ class Train:
 
         self.velocity_x = self.velocity_current_mps * math.cos(self.rotation)
         self.velocity_y = self.velocity_current_mps * math.sin(self.rotation)
+
+    def _parse_location(self, location):
+        offset_x = (location['tileX'] - self.start_tile_x) * TILE_SIZE
+        offset_z = (location['tileZ'] - self.start_tile_z) * TILE_SIZE
+        return location['x'] + offset_x, location['z'] + offset_z, location['y']
+

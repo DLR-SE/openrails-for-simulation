@@ -11,14 +11,10 @@ namespace Orts.Viewer3D.WebServices
     class OutputGenerator
     {
         private Viewer Viewer;
-        private int InitialTileX;
-        private int InitialTileZ;
-
+        
         public OutputGenerator(Viewer viewer)
         {
             Viewer = viewer;
-            InitialTileX = viewer.PlayerLocomotive.WorldPosition.TileX;
-            InitialTileZ = viewer.PlayerLocomotive.WorldPosition.TileZ;
         }
 
         public Dictionary<string, object> CreateOutput()
@@ -54,12 +50,12 @@ namespace Orts.Viewer3D.WebServices
         /// <returns></returns>
         private Dictionary<string, object> GetFrontRearWorldPos(Simulation.Physics.Train train)
         {
-            var FrontPos = train.FirstCar.WorldPosition.WorldLocation.Location;
-            var RearPos = train.LastCar.WorldPosition.WorldLocation.Location;
+            var FrontPos = train.FirstCar.WorldPosition;
+            var RearPos = train.LastCar.WorldPosition;
             return new Dictionary<string, object>()
             {
-                {"Front", FrontPos},
-                {"Rear", RearPos}
+                {"Front", WorldPosition2Dict(FrontPos)},
+                {"Rear", WorldPosition2Dict(RearPos)}
             };
         }
         /// <summary>
@@ -138,11 +134,16 @@ namespace Orts.Viewer3D.WebServices
         private Dictionary<string, object> GetLocationCoordinates(Simulation.Physics.Train train)
         {
             var locomotive = train.FindLeadLocomotive();
-            var worldPosition = new WorldPosition(locomotive.WorldPosition);
-            worldPosition.NormalizeTo(InitialTileX, InitialTileZ);
+            return WorldPosition2Dict(locomotive.WorldPosition);
+            
+        }
 
+        private Dictionary<string,object> WorldPosition2Dict(WorldPosition worldPosition)
+        {
             return new Dictionary<string, object>()
             {
+                {"tileX", worldPosition.TileX},
+                {"tileZ", worldPosition.TileZ},
                 {"x",  worldPosition.Location.X},
                 {"y", worldPosition.Location.Y},
                 {"z", worldPosition.Location.Z},
